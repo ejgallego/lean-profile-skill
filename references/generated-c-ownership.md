@@ -57,6 +57,9 @@ module name fragments, or runtime calls visible in the profile.
 
 ## Runtime Symbols To Track
 
+Treat the names below as search leads, not a stable ABI. Verify them against the
+active toolchain's runtime headers, generated C, and sampled native symbols.
+
 Prefer these sample-visible runtime symbols:
 
 - `lean_copy_expand_array_nonlinear`: an explicit profiling marker for an array

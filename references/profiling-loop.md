@@ -19,6 +19,10 @@ Use this reference for the concrete mechanics of profiling Lean executables.
 Prefer a repository's established profiling harness. Otherwise select a native
 sampling backend before changing build flags:
 
+The command examples in this reference use POSIX shell syntax. Translate command
+discovery, variables, and redirection when working on Windows even though
+`samply` itself supports Windows targets.
+
 1. On Linux, use `perf` only after verifying that it is installed and permitted:
 
    ```bash
@@ -151,16 +155,21 @@ python3 "$skill_dir/scripts/compare_commands.py" \
   --baseline '["./baseline/run", "arg"]' \
   --candidate '["./candidate/run", "arg"]' \
   --artifact path/to/input \
+  --artifact lean-toolchain \
+  --metadata build=release \
+  --metadata diagnostics=off \
   --passes 2 --warmups 1 \
   --out-dir _profiles/compare-001
 ```
 
 Two passes provide one AB/BA cycle for screening. Increase to a larger even
 count for acceptance work, and repeat `--artifact` for every relevant input.
-The script refuses to overwrite an existing output directory and stores raw
-JSONL rows, command and artifact identities, dirty tracked patches,
-stdout/stderr, paired deltas, and warnings about short or minimally repeated
-runs.
+Use each `--metadata` key once. The script refuses to overwrite an existing
+output directory and stores raw JSONL rows, command and artifact identities,
+dirty tracked patches, stdout/stderr, paired deltas, and warnings about short or
+minimally repeated runs. It rechecks executable, artifact, Git revision, and
+tracked-diff identities after execution, writes `identity-check.json`, and
+returns failure if any of them drifted.
 
 Pass `--perf-events` with
 `cycles:u,instructions:u,branches:u,branch-misses:u,cache-references:u` only

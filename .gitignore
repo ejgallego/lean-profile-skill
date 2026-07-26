@@ -6,3 +6,7 @@
 .DS_Store
 *.swp
 *~
+
+# Python caches
+__pycache__/
+*.py[cod]

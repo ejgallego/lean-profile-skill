@@ -25,6 +25,41 @@ note, while linking large raw artifacts rather than embedding them.
 - `decision`: one-sentence reason
 - `remaining_hotspot`: next measured target, if known
 
+## Compact JSONL Example
+
+Keep one logical record per line when maintaining a ledger. This formatted
+example is the same object written compactly in JSONL:
+
+```json
+{
+  "id": "array-update-01",
+  "status": "rejected",
+  "hypothesis": "Remove a nonlinear array copy from the sampled caller.",
+  "representative_workload": {"argv": ["./run", "input.bin"]},
+  "focused_workload": null,
+  "baseline": {"commit": "abc123", "binary_sha256": "sha256:baseline"},
+  "candidate": {"commit": "def456", "binary_sha256": "sha256:candidate"},
+  "inputs": [{"path": "input.bin", "sha256": "sha256:input"}],
+  "measurement": {
+    "host": "host-id",
+    "toolchain": "lean-version",
+    "build": "release",
+    "events": [],
+    "warmups": 1,
+    "repetitions": 10,
+    "order": "AB/BA"
+  },
+  "endpoint": {"expected": "exit 0", "observed": "exit 0"},
+  "attribution": "lean_copy_expand_array_nonlinear in updateState",
+  "mechanism": "The candidate retained the old state through the result value.",
+  "results": {"raw": "_profiles/compare-001", "median_delta_percent": 1.2},
+  "post_profile": "The original caller remained.",
+  "correctness": [{"command": "lake test", "outcome": "passed"}],
+  "decision": "Reject: ownership and representative runtime did not improve.",
+  "remaining_hotspot": "updateState caller retention"
+}
+```
+
 ## Decision Rules
 
 - Mark `accepted` only when the representative path, correctness checks, and

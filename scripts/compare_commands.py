@@ -9,6 +9,7 @@ import hashlib
 import json
 import os
 import platform
+import signal
 import shutil
 import statistics
 import subprocess
@@ -36,8 +37,17 @@ def parse_metadata(values: list[str]) -> dict[str, str]:
         key, separator, item = value.partition("=")
         if not separator or not key:
             raise ValueError(f"metadata must have KEY=VALUE form: {value!r}")
+        if key in result:
+            raise ValueError(f"duplicate metadata key: {key!r}")
         result[key] = item
     return result
+
+
+def write_json(path: Path, value: Any) -> None:
+    path.write_text(
+        json.dumps(value, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
 
 
 def sha256_file(path: Path) -> str:
@@ -115,6 +125,104 @@ def command_identity(command: list[str], cwd: Path) -> dict[str, Any]:
     }
 
 
+def check_identity(
+    cwd: Path,
+    commands: dict[str, dict[str, Any]],
+    artifacts: list[dict[str, str]],
+    git: dict[str, Any] | None,
+) -> dict[str, Any]:
+    changes: list[dict[str, Any]] = []
+
+    for label, before in commands.items():
+        before_identity = {
+            "executable": before["executable"],
+            "executable_sha256": before["executable_sha256"],
+        }
+        try:
+            current = command_identity(before["argv"], cwd)
+            after_identity = {
+                "executable": current["executable"],
+                "executable_sha256": current["executable_sha256"],
+            }
+        except (FileNotFoundError, OSError) as error:
+            after_identity = {"error": str(error)}
+        if after_identity != before_identity:
+            changes.append(
+                {
+                    "subject": f"command:{label}",
+                    "before": before_identity,
+                    "after": after_identity,
+                }
+            )
+
+    for before in artifacts:
+        path = Path(before["path"])
+        try:
+            after_identity: dict[str, Any] = {
+                "path": str(path),
+                "sha256": sha256_file(path),
+            }
+        except OSError as error:
+            after_identity = {"path": str(path), "error": str(error)}
+        if after_identity != before:
+            changes.append(
+                {
+                    "subject": f"artifact:{path}",
+                    "before": before,
+                    "after": after_identity,
+                }
+            )
+
+    current_git, _ = git_identity(cwd)
+    git_fields = ("root", "head", "tracked_diff_sha256")
+    before_git = {field: git.get(field) for field in git_fields} if git else None
+    after_git = (
+        {field: current_git.get(field) for field in git_fields}
+        if current_git
+        else None
+    )
+    if after_git != before_git:
+        changes.append(
+            {
+                "subject": "git",
+                "before": before_git,
+                "after": after_git,
+            }
+        )
+
+    return {
+        "schema": "lean-profile-identity-check-alpha",
+        "checked_at_utc": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "valid": not changes,
+        "changes": changes,
+    }
+
+
+def terminate_process_group(process: subprocess.Popen[bytes]) -> None:
+    if process.poll() is not None:
+        return
+    if os.name == "posix":
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            return
+    else:
+        process.terminate()
+    try:
+        process.wait(timeout=1.0)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+    if os.name == "posix":
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            return
+    else:
+        process.kill()
+    process.wait()
+
+
 def summarize(values: list[int]) -> dict[str, float | int]:
     return {
         "count": len(values),
@@ -137,8 +245,20 @@ def main() -> int:
     parser.add_argument("--warmups", type=int, default=1, help="warmups per command")
     parser.add_argument("--expected-exit-code", type=int, default=0)
     parser.add_argument("--timeout-seconds", type=float)
-    parser.add_argument("--artifact", action="append", default=[], type=Path)
-    parser.add_argument("--metadata", action="append", default=[], metavar="KEY=VALUE")
+    parser.add_argument(
+        "--artifact",
+        action="append",
+        default=[],
+        type=Path,
+        help="repeatable file whose SHA-256 identity must remain stable",
+    )
+    parser.add_argument(
+        "--metadata",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help="repeatable experiment metadata; each key must be unique",
+    )
     parser.add_argument(
         "--perf-events",
         help="comma-separated perf stat events; produces one counter file per measured run",
@@ -158,6 +278,15 @@ def main() -> int:
         metadata = parse_metadata(args.metadata)
     except (argparse.ArgumentTypeError, ValueError) as error:
         parser.error(str(error))
+
+    preflight_warnings = []
+    if baseline == candidate:
+        warning = (
+            "Baseline and candidate argv are identical; interpret this as a "
+            "noise-control run."
+        )
+        preflight_warnings.append(warning)
+        print(f"warning: {warning}", file=sys.stderr)
 
     cwd = Path.cwd().resolve()
     out_dir = args.out_dir
@@ -222,6 +351,7 @@ def main() -> int:
         if perf
         else None,
         "metadata": metadata,
+        "warnings": preflight_warnings,
     }
 
     out_dir.mkdir(parents=True)
@@ -231,12 +361,20 @@ def main() -> int:
         (out_dir / "perf-stat").mkdir()
     if tracked_diff is not None:
         (out_dir / "git-tracked.patch").write_bytes(tracked_diff)
-    (out_dir / "manifest.json").write_text(
-        json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
+    write_json(out_dir / "manifest.json", manifest)
 
     rows: list[dict[str, Any]] = []
     sequence = 0
+
+    def capture_identity_check() -> dict[str, Any]:
+        identity_check = check_identity(cwd, commands, artifacts, git)
+        write_json(out_dir / "identity-check.json", identity_check)
+        if not identity_check["valid"]:
+            print(
+                f"identity drift detected; comparison is invalid; evidence preserved in {out_dir}",
+                file=sys.stderr,
+            )
+        return identity_check
 
     def run_one(label: str, phase: str, pass_number: int | None, slot: int) -> bool:
         nonlocal sequence
@@ -267,19 +405,22 @@ def main() -> int:
         started_ns = time.perf_counter_ns()
         timed_out = False
         with stdout_path.open("wb") as stdout, stderr_path.open("wb") as stderr:
+            process = subprocess.Popen(
+                invoked,
+                cwd=cwd,
+                stdout=stdout,
+                stderr=stderr,
+                start_new_session=os.name == "posix",
+            )
             try:
-                result = subprocess.run(
-                    invoked,
-                    cwd=cwd,
-                    stdout=stdout,
-                    stderr=stderr,
-                    timeout=args.timeout_seconds,
-                    check=False,
-                )
-                exit_code = result.returncode
+                exit_code = process.wait(timeout=args.timeout_seconds)
             except subprocess.TimeoutExpired:
                 timed_out = True
+                terminate_process_group(process)
                 exit_code = None
+            except KeyboardInterrupt:
+                terminate_process_group(process)
+                raise
         elapsed_ns = time.perf_counter_ns() - started_ns
         row = {
             "sequence": sequence,
@@ -304,6 +445,7 @@ def main() -> int:
     for warmup in range(1, args.warmups + 1):
         for slot, label in enumerate(("baseline", "candidate"), start=1):
             if not run_one(label, "warmup", warmup, slot):
+                capture_identity_check()
                 print(f"{label} warmup failed; evidence preserved in {out_dir}", file=sys.stderr)
                 return 1
 
@@ -311,12 +453,14 @@ def main() -> int:
         order = ("baseline", "candidate") if pass_number % 2 else ("candidate", "baseline")
         for slot, label in enumerate(order, start=1):
             if not run_one(label, "measured", pass_number, slot):
+                capture_identity_check()
                 print(
                     f"{label} measured run failed; evidence preserved in {out_dir}",
                     file=sys.stderr,
                 )
                 return 1
 
+    identity_check = capture_identity_check()
     measured = [row for row in rows if row["phase"] == "measured"]
     baseline_ns = [row["elapsed_ns"] for row in measured if row["label"] == "baseline"]
     candidate_ns = [row["elapsed_ns"] for row in measured if row["label"] == "candidate"]
@@ -329,7 +473,7 @@ def main() -> int:
     candidate_summary = summarize(candidate_ns)
     baseline_median = float(baseline_summary["median_ns"])
     candidate_median = float(candidate_summary["median_ns"])
-    warnings = []
+    warnings = list(preflight_warnings)
     if min(baseline_median, candidate_median) < 100_000_000:
         warnings.append(
             "Median runtime is under 100 ms; process startup and timer noise may dominate."
@@ -349,14 +493,13 @@ def main() -> int:
         ),
         "paired_delta_median_ns": statistics.median(paired_deltas),
         "paired_deltas_ns": paired_deltas,
+        "identity_check": identity_check,
         "warnings": warnings,
     }
-    (out_dir / "summary.json").write_text(
-        json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
+    write_json(out_dir / "summary.json", summary)
     print(json.dumps(summary, indent=2, sort_keys=True))
     print(f"Raw evidence: {out_dir}")
-    return 0
+    return 0 if identity_check["valid"] else 1
 
 
 if __name__ == "__main__":

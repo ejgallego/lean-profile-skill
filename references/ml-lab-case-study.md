@@ -126,11 +126,9 @@ hotspots; that strategy has repeatedly produced noisy symptoms rather than
 actionable ownership/compiler evidence.
 
 Use `select-next-perf-target.py` on a fresh current-head report before choosing
-a target from older perf-history artifacts. In the 2026-07-08 usability test,
-the stale history artifact pointed at `dynlink_private_test`, while the fresh
-current report ranked the same startup/dynlink family but put
-`dynlink_initializers_test10` and packed-module Dynlink rows first. Preserve the
-lesson, not the exact row: refresh before optimizing.
+a target from older perf-history artifacts. Historical rankings can preserve the
+right cost family while pointing at a stale representative row. Refresh the
+current-head report before optimizing.
 
 For ownership work:
 
