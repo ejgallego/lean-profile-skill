@@ -87,7 +87,8 @@ regression evidence from an established harness.
 ## Reference Routing
 
 - Read [profiling-loop.md](references/profiling-loop.md) for concrete `perf`,
-  flamegraph, `samply`, frame-pointer, and measurement-loop commands.
+  flamegraph, `samply`, frame-pointer, and measurement-loop commands, plus the
+  order-balanced invocation of the bundled `scripts/compare_commands.py`.
 - Read [generated-c-ownership.md](references/generated-c-ownership.md) when the
   profile points at Lean runtime allocation, reference counting, persistent data
   structure copies, or suspected linearity issues.
@@ -99,56 +100,6 @@ regression evidence from an established harness.
 - Read [ml-lab-case-study.md](references/ml-lab-case-study.md) only for ml-lab
   work or for analogous Lean interpreters/runtimes where faithful execution,
   linked bytecode, and runtime-state locality matter.
-
-## Minimal Attribution Commands
-
-If the repository has no profiling harness, create a new output directory for
-each baseline or candidate profile. Never reuse the same `perf.data` path:
-
-```bash
-profile_run_dir="_profiles/baseline-001"
-test ! -e "$profile_run_dir"
-mkdir -p "$profile_run_dir"
-
-lake build <target>
-
-perf record -F 997 --call-graph dwarf -o "$profile_run_dir/perf.data" -- \
-  .lake/build/bin/<exe> <args>
-
-perf report --stdio --no-children -i "$profile_run_dir/perf.data" \
-  --sort overhead,symbol --percent-limit 0.5
-```
-
-On non-Linux systems, or when `samply` provides better call-tree browsing,
-record an artifact without starting a blocking local server:
-
-```bash
-samply record --save-only -o "$profile_run_dir/profile.json.gz" -- \
-  .lake/build/bin/<exe> <args>
-```
-
-Load it interactively later with
-`samply load "$profile_run_dir/profile.json.gz"`.
-
-For a generic elapsed-time comparison, resolve this skill directory as
-`skill_dir`, then run:
-
-```bash
-python3 "$skill_dir/scripts/compare_commands.py" \
-  --baseline '["./baseline/run", "arg"]' \
-  --candidate '["./candidate/run", "arg"]' \
-  --artifact path/to/input \
-  --passes 2 --warmups 1 \
-  --out-dir _profiles/compare-001
-```
-
-Two passes provide one AB/BA cycle for screening. Increase to a larger even
-count for acceptance work, and repeat `--artifact` for every relevant input.
-
-Pass `--perf-events` with
-`cycles:u,instructions:u,branches:u,branch-misses:u,cache-references:u` only
-after sampled attribution identifies a target. The script stores one counter
-file per scheduled run instead of collapsing repetitions into an aggregate.
 
 ## Guardrails
 

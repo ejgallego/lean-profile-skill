@@ -6,6 +6,7 @@ Use this reference for the concrete mechanics of profiling Lean executables.
 
 - Backend Preflight
 - Measurement Loop
+- Order-Balanced Comparison
 - Phase Mapping
 - Attribution Quality
 - Attribution Escalation
@@ -114,11 +115,10 @@ perf stat \
 ```
 
 Use user-space events (`:u`) for Lean executable work unless kernel time is the
-subject. For baseline/candidate repeats, use the bundled
-`scripts/compare_commands.py` with `--perf-events` so every AB/BA run gets a
-separate counter file and raw JSONL row. Keep warmups separate from measured
-samples. Treat counters as acceptance or regression evidence after a target is
-known, not as the way to find the target.
+subject. For baseline/candidate repeats, use the order-balanced comparison
+below. Keep warmups separate from measured samples. Treat counters as acceptance
+or regression evidence after a target is known, not as the way to find the
+target.
 
 5. Render flamegraphs when visual call paths help:
 
@@ -140,6 +140,33 @@ samply record --save-only -o "$profile_run_dir/profile.json.gz" -- \
 Use `samply load "$profile_run_dir/profile.json.gz"` later when interactive
 browsing is wanted. `--no-open` alone still starts a local server and can block
 an unattended agent.
+
+## Order-Balanced Comparison
+
+If the repository has no comparison harness, resolve this skill directory as
+`skill_dir`, then run:
+
+```bash
+python3 "$skill_dir/scripts/compare_commands.py" \
+  --baseline '["./baseline/run", "arg"]' \
+  --candidate '["./candidate/run", "arg"]' \
+  --artifact path/to/input \
+  --passes 2 --warmups 1 \
+  --out-dir _profiles/compare-001
+```
+
+Two passes provide one AB/BA cycle for screening. Increase to a larger even
+count for acceptance work, and repeat `--artifact` for every relevant input.
+The script refuses to overwrite an existing output directory and stores raw
+JSONL rows, command and artifact identities, dirty tracked patches,
+stdout/stderr, paired deltas, and warnings about short or minimally repeated
+runs.
+
+Pass `--perf-events` with
+`cycles:u,instructions:u,branches:u,branch-misses:u,cache-references:u` only
+after sampled attribution identifies a target. The script then stores one
+counter file per scheduled run instead of collapsing repetitions into an
+aggregate.
 
 ## Phase Mapping
 
