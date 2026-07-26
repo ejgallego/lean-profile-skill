@@ -1,0 +1,8 @@
+# Local agent/session state
+.agents/
+.codex/
+
+# Editor and operating-system noise
+.DS_Store
+*.swp
+*~
