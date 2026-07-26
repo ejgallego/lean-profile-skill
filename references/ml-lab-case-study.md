@@ -135,8 +135,9 @@ lesson, not the exact row: refresh before optimizing.
 For ownership work:
 
 - inspect generated C for the relevant helper;
-- check sampled callers of `lean_copy_expand_array`, `lean_array_set`, and
-  `lean_dec_ref_cold`;
+- check sampled callers of `lean_copy_expand_array_nonlinear`,
+  `lean_copy_expand_array`, and `lean_dec_ref_cold`; treat inline operations
+  such as `lean_array_set` as generated-C/IR markers;
 - keep the acceptance run diagnostics-off;
 - only add `:::ownership-audit "short-id"` comments as structured notes, not
   proofs.

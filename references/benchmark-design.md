@@ -45,7 +45,8 @@ Treat benchmark identity as a schema, not prose. Capture:
 
 - command and argument vector;
 - executable, input, bytecode/corpus, and harness hashes;
-- repository commit and dirty state;
+- repository commit and dirty state, plus the tracked-diff hash and hashes of
+  task-relevant untracked files when dirty;
 - toolchain, build mode, diagnostics, environment-relevant configuration;
 - fuel/input size, expected status, terminal PC or equivalent endpoint;
 - event list, inheritance policy, warmups, repetitions, and run order;
@@ -53,7 +54,15 @@ Treat benchmark identity as a schema, not prose. Capture:
 
 Use AB/BA or another order-balanced schedule when comparing noisy elapsed
 times. Preserve pass and sequence columns so aggregation cannot silently keep
-only the final run. Keep one-pass runs available for quick screening.
+only the final run. Report the paired deltas and raw distribution, and mark the
+result inconclusive when the claimed effect is not distinguishable from
+run-order or observed noise. Keep one-pass runs available for quick screening.
+
+If the repository has no comparison harness, resolve this skill directory and
+use `scripts/compare_commands.py`. It refuses to overwrite an existing output
+directory and records command arrays, executable and input hashes, Git identity,
+stdout/stderr, elapsed time, optional per-run `perf stat` output, and the AB/BA
+sequence.
 
 ## Ranking Targets
 
@@ -131,7 +140,7 @@ A landing-quality bundle should contain:
 
 1. identity metadata and raw runs;
 2. endpoint/status validation;
-3. diagnostics-off representative before/after results;
+3. diagnostics-off, order-balanced representative before/after results;
 4. secondary counters with their event and inheritance policy;
 5. pre- and post-change sampled profile summaries;
 6. generated C/IR evidence for ownership or allocation claims;

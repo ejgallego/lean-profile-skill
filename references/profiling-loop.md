@@ -4,14 +4,40 @@ Use this reference for the concrete mechanics of profiling Lean executables.
 
 ## Contents
 
+- Backend Preflight
 - Measurement Loop
 - Phase Mapping
 - Attribution Quality
 - Attribution Escalation
-- Counter Trap
 - Controlled Windows
 - Post-change Verification
 - Reporting
+
+## Backend Preflight
+
+Prefer a repository's established profiling harness. Otherwise select a native
+sampling backend before changing build flags:
+
+1. On Linux, use `perf` only after verifying that it is installed and permitted:
+
+   ```bash
+   command -v perf
+   perf stat -e cycles:u -- true
+   ```
+
+   If the probe reports a permission or unsupported-event error, preserve the
+   exact diagnostic. Do not silently replace attribution with elapsed timings.
+
+2. On Linux, macOS, or Windows, use `samply` when it is installed and can record
+   the target:
+
+   ```bash
+   command -v samply
+   ```
+
+3. If neither backend works, report the blocker and the attempted commands.
+   Continue with workload definition and identity capture, but do not make a
+   hotspot claim from timing alone.
 
 ## Measurement Loop
 
@@ -22,7 +48,14 @@ git status --short
 git rev-parse --short HEAD
 cat lean-toolchain 2>/dev/null || true
 lake --version
+python3 -c 'import platform; print(platform.platform())'
 ```
+
+Capture this state before creating repo-local profile outputs. Prefer committed
+baseline and candidate revisions. For a dirty candidate, save
+`git diff --binary --full-index HEAD`, hash that patch, and separately hash every
+task-relevant untracked source or input; `git diff` does not contain untracked
+files.
 
 2. Build once before measuring:
 
@@ -35,12 +68,20 @@ Lake normally places executables under `.lake/build/bin` and generated
 intermediate artifacts, primarily C code, under `.lake/build/ir`. Keep the
 build type explicit when it matters:
 
+Hash the executable and every relevant input after the build. The bundled
+comparison script records SHA-256 identities for both executables and every
+file passed through `--artifact`; when working manually, use the platform's
+available SHA-256 tool.
+
 - `release` is the normal headline benchmark shape;
 - `debug` uses `-O0 -g` and is for debugging/attribution, not headline speed;
 - `relWithDebInfo` keeps optimization with debug info and can be useful for
   attribution if the project supports it;
-- extra `leanc` flags in `moreLeancArgs` affect build traces, while
-  `weakLeancArgs` can be changed without forcing the same rebuild semantics.
+- put profiling-critical `leanc` flags in `moreLeancArgs` so Lake invalidates
+  the affected build trace;
+- do not use `weakLeancArgs` for frame-pointer or debug-info changes unless the
+  affected artifacts are explicitly invalidated and the rebuilt binary hash is
+  verified. Those arguments can change without triggering a rebuild.
 
 3. Record sampled profiles:
 
@@ -49,10 +90,14 @@ failed in practice because it tends to identify symptoms rather than the
 compiler/runtime ownership path that caused them.
 
 ```bash
-perf record -F 997 --call-graph dwarf -o perf.data -- \
+profile_run_dir="_profiles/baseline-001"
+test ! -e "$profile_run_dir"
+mkdir -p "$profile_run_dir"
+
+perf record -F 997 --call-graph dwarf -o "$profile_run_dir/perf.data" -- \
   .lake/build/bin/<exe> <args>
 
-perf report --stdio --no-children -i perf.data \
+perf report --stdio --no-children -i "$profile_run_dir/perf.data" \
   --sort overhead,symbol --percent-limit 0.5
 ```
 
@@ -62,30 +107,39 @@ views after the self-time view tells you which region matters.
 4. Use counters only after attribution:
 
 ```bash
-perf stat -r 5 \
+perf stat \
   -e cycles:u,instructions:u,branches:u,branch-misses:u,cache-references:u \
+  -o "$profile_run_dir/perf-stat.txt" \
   -- .lake/build/bin/<exe> <args>
 ```
 
 Use user-space events (`:u`) for Lean executable work unless kernel time is the
-subject. Increase repeats when the command is short or noisy. Keep warmups
-separate from measured samples. Treat these totals as acceptance or regression
-evidence after a target is known, not as the way to find the target.
+subject. For baseline/candidate repeats, use the bundled
+`scripts/compare_commands.py` with `--perf-events` so every AB/BA run gets a
+separate counter file and raw JSONL row. Keep warmups separate from measured
+samples. Treat counters as acceptance or regression evidence after a target is
+known, not as the way to find the target.
 
 5. Render flamegraphs when visual call paths help:
 
 ```bash
-perf script -i perf.data > perf.script
-stackcollapse-perf.pl perf.script > perf.folded
-flamegraph.pl --title "Lean profile" perf.folded > profile.svg
+perf script -i "$profile_run_dir/perf.data" > "$profile_run_dir/perf.script"
+stackcollapse-perf.pl "$profile_run_dir/perf.script" \
+  > "$profile_run_dir/perf.folded"
+flamegraph.pl --title "Lean profile" "$profile_run_dir/perf.folded" \
+  > "$profile_run_dir/profile.svg"
 ```
 
 If FlameGraph scripts are not installed, use `samply`:
 
 ```bash
-XDG_CACHE_HOME=/tmp/samply-cache \
-  samply record --no-open -- .lake/build/bin/<exe> <args>
+samply record --save-only -o "$profile_run_dir/profile.json.gz" -- \
+  .lake/build/bin/<exe> <args>
 ```
+
+Use `samply load "$profile_run_dir/profile.json.gz"` later when interactive
+browsing is wanted. `--no-open` alone still starts a local server and can block
+an unattended agent.
 
 ## Phase Mapping
 
@@ -143,20 +197,6 @@ Escalate in this order:
 
 Do not jump directly to debugger instrumentation when samples and generated
 code already explain the caller. Record why each escalation was necessary.
-
-## Counter Trap
-
-Do not add Lean/runtime counters as the default way to discover hotspots. This
-strategy has failed on Lean systems because counters and helper timers often:
-
-- perturb the code shape being measured;
-- miss ownership changes introduced by the compiler and runtime;
-- flatten several caller paths into one aggregate number;
-- encourage optimizing a diagnostic fixture instead of the representative path.
-
-Use counters only when they are already part of a stable harness or when a user
-explicitly requests a counter experiment. Even then, pair them with samples and
-generated C/IR before deciding what to change.
 
 ## Controlled Windows
 

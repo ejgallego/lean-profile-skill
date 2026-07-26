@@ -11,13 +11,15 @@ note, while linking large raw artifacts rather than embedding them.
 - `hypothesis`: predicted caller/runtime-bucket movement
 - `representative_workload`: exact user-visible workload
 - `focused_workload`: optional mechanism validator
-- `baseline` and `candidate`: commit plus binary hash
-- `inputs`: input/bytecode/corpus hashes and arguments
+- `baseline` and `candidate`: commit plus binary hash; for dirty revisions,
+  tracked-diff hash plus hashes of task-relevant untracked source files
+- `inputs`: input/bytecode/corpus hashes and exact argument arrays
 - `measurement`: host, toolchain, build, events, warmups, repetitions, order
 - `endpoint`: expected and observed status/terminal boundary
 - `attribution`: pre-change sampled hotspot and caller
 - `mechanism`: upstream/runtime surface and generated C/IR explanation
-- `results`: raw artifact link plus aggregate deltas
+- `results`: raw artifact link, pass/sequence rows, paired deltas, and aggregate
+  summaries
 - `post_profile`: whether the predicted hotspot movement occurred
 - `correctness`: commands and outcomes
 - `decision`: one-sentence reason
@@ -32,6 +34,8 @@ note, while linking large raw artifacts rather than embedding them.
   hypothesis.
 - Mark `inconclusive` when noise, identity drift, endpoint mismatch, or broken
   call chains prevent a claim.
+- Mark `inconclusive` when a claimed timing effect is not distinguishable from
+  the observed run-order or paired-run variation.
 - Preserve rejected records and patches so the idea is not rediscovered as
   untried work.
 

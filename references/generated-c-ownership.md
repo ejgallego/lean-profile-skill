@@ -48,7 +48,8 @@ Lake normally writes generated intermediate artifacts, primarily C code, under
 
 ```bash
 rg --files .lake/build | rg '\.c$'
-rg -n 'lean_copy_expand_array|lean_array_set|lean_array_fset|lean_inc|lean_dec' .lake/build
+rg -n 'lean_copy_expand_array(_nonlinear)?|lean_array_set|lean_array_fset|lean_inc|lean_dec' \
+  .lake/build
 ```
 
 If the function name is mangled, search for the Lean definition suffix, nearby
@@ -56,22 +57,21 @@ module name fragments, or runtime calls visible in the profile.
 
 ## Runtime Symbols To Track
 
-Common evidence:
+Prefer these sample-visible runtime symbols:
 
-- `lean_copy_expand_array`: array copy or expansion on a hot path;
-- `lean_array_set`: persistent array update, often copying if not exclusive;
-- `lean_array_fset`: proof-carrying array update; promising but not sufficient
-  alone;
+- `lean_copy_expand_array_nonlinear`: an explicit profiling marker for an array
+  copy caused by non-exclusive ownership;
+- `lean_copy_expand_array`: array copy or capacity expansion;
 - `lean_array_push`: array growth or builder pressure;
-- `lean_inc`, `lean_inc_ref`: retained owners;
-- `lean_dec`, `lean_dec_ref`, `lean_dec_ref_cold`: release/reference-count
-  pressure;
-- `lean_is_exclusive`: runtime exclusivity test;
-- `lean_alloc_ctor`, `lean_ctor_release`: object rebuild and release churn;
+- `lean_dec_ref_cold`: object-release/reference-count pressure;
+- `lean_alloc_ctor`: constructor allocation;
 - allocator symbols such as `mi_malloc_small` and `mi_free`: allocation volume.
 
-Do not infer that one symbol is always bad. Explain it through the caller and
-the data structure being updated.
+Also grep generated C/IR for `lean_array_set`, `lean_array_fset`, `lean_inc`,
+`lean_inc_ref`, `lean_dec`, `lean_is_exclusive`, and `lean_ctor_release`. These
+are often inline operations and may not survive as standalone optimized native
+symbols. Do not infer that one marker is always bad. Explain it through the
+caller and the data structure being updated.
 
 ## Inspection Pattern
 
@@ -104,10 +104,10 @@ Useful shell shapes:
 
 ```bash
 rg -n 'MyModule.*myHelper|myHelper' .lake/build
-rg -n 'lean_copy_expand_array|lean_array_set|lean_array_fset|lean_inc|lean_dec' \
+rg -n 'lean_copy_expand_array(_nonlinear)?|lean_array_set|lean_array_fset|lean_inc|lean_dec' \
   .lake/build/path/to/generated.c
-perf report --stdio --no-children -i perf.data --percent-limit 0.0 | \
-  rg 'lean_copy_expand_array|lean_dec_ref_cold|myHelper'
+perf report --stdio --no-children -i path/to/perf.data --percent-limit 0.0 | \
+  rg 'lean_copy_expand_array(_nonlinear)?|lean_dec_ref_cold|myHelper'
 ```
 
 ## Lean Optimization Heuristics

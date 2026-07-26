@@ -1,12 +1,21 @@
 ---
 name: lean-profile-skill
-description: Profile and optimize Lean executables and generated native code. Use when Codex needs to diagnose Lean performance regressions, compare baseline and candidate runs, collect perf or samply evidence, inspect generated C for ownership/allocation behavior, design benchmarks, or document accepted and rejected optimization work.
+description: Profile and optimize the runtime of compiled Lean executables and their generated native code. Use when Codex needs to diagnose executable runtime regressions, compare baseline and candidate binaries, collect perf or samply evidence, inspect generated C for ownership/allocation behavior, design native-runtime benchmarks, or document accepted and rejected runtime optimizations. Do not use as the first-line workflow for theorem or tactic elaboration, module compilation, or general Lake build-time profiling.
 ---
 
-# Lean Profiling
+# Lean Native Runtime Profiling
 
 Use this skill to turn a vague Lean speed problem into comparable measurements,
 credible attribution, and a landable optimization story.
+
+## Scope Gate
+
+Confirm that the slow region occurs while running compiled Lean code. If the
+request concerns theorem or tactic elaboration, module compilation, dependency
+builds, or general `lake build` latency, stop this workflow and begin with
+`lean --profile`, the `profiler` options, or `trace.profiler`. Return to this
+skill only if that investigation identifies native executable runtime as the
+cost surface.
 
 ## Prominent Lesson
 
@@ -41,6 +50,9 @@ regression evidence from an established harness.
    - Prefer repo-local harnesses when they already exist.
    - Prefer repo-local target-selection, acceptance-summary, or ownership-triage
      scripts over reconstructing those reports by hand.
+   - If no comparison harness exists, use the bundled
+     `scripts/compare_commands.py` to preserve order-balanced raw runs and
+     command identities.
    - If no harness exists, record a sampled profile first; do not build a local
      counter instrumentation plan as the first move.
 
@@ -88,27 +100,55 @@ regression evidence from an established harness.
   work or for analogous Lean interpreters/runtimes where faithful execution,
   linked bytecode, and runtime-state locality matter.
 
-## Default Commands
+## Minimal Attribution Commands
 
-If the repository has no profiling harness, start with these shapes and adapt
-only the executable command:
+If the repository has no profiling harness, create a new output directory for
+each baseline or candidate profile. Never reuse the same `perf.data` path:
 
 ```bash
+profile_run_dir="_profiles/baseline-001"
+test ! -e "$profile_run_dir"
+mkdir -p "$profile_run_dir"
+
 lake build <target>
 
-perf record -F 997 --call-graph dwarf -o perf.data -- \
+perf record -F 997 --call-graph dwarf -o "$profile_run_dir/perf.data" -- \
   .lake/build/bin/<exe> <args>
 
-perf report --stdio --no-children -i perf.data \
+perf report --stdio --no-children -i "$profile_run_dir/perf.data" \
   --sort overhead,symbol --percent-limit 0.5
-
-perf stat -r 5 \
-  -e cycles:u,instructions:u,branches:u,branch-misses:u,cache-references:u \
-  -- .lake/build/bin/<exe> <args>
 ```
 
-Use `samply record --no-open -- <command>` when interactive call-tree browsing
-is more useful than raw counter totals. For Lean, it usually is.
+On non-Linux systems, or when `samply` provides better call-tree browsing,
+record an artifact without starting a blocking local server:
+
+```bash
+samply record --save-only -o "$profile_run_dir/profile.json.gz" -- \
+  .lake/build/bin/<exe> <args>
+```
+
+Load it interactively later with
+`samply load "$profile_run_dir/profile.json.gz"`.
+
+For a generic elapsed-time comparison, resolve this skill directory as
+`skill_dir`, then run:
+
+```bash
+python3 "$skill_dir/scripts/compare_commands.py" \
+  --baseline '["./baseline/run", "arg"]' \
+  --candidate '["./candidate/run", "arg"]' \
+  --artifact path/to/input \
+  --passes 2 --warmups 1 \
+  --out-dir _profiles/compare-001
+```
+
+Two passes provide one AB/BA cycle for screening. Increase to a larger even
+count for acceptance work, and repeat `--artifact` for every relevant input.
+
+Pass `--perf-events` with
+`cycles:u,instructions:u,branches:u,branch-misses:u,cache-references:u` only
+after sampled attribution identifies a target. The script stores one counter
+file per scheduled run instead of collapsing repetitions into an aggregate.
 
 ## Guardrails
 
