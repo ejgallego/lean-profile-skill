@@ -10,6 +10,7 @@ persistent array copies, or suspected missed in-place updates.
 - Locate Generated C
 - Runtime Symbols To Track
 - Inspection Pattern
+- Expressibility, Control Flow, And Code Placement
 - Lean Optimization Heuristics
 - Acceptance Evidence
 
@@ -113,6 +114,38 @@ perf report --stdio --no-children -i path/to/perf.data --percent-limit 0.0 | \
   rg 'lean_copy_expand_array(_nonlinear)?|lean_dec_ref_cold|myHelper'
 ```
 
+## Expressibility, Control Flow, And Code Placement
+
+One generated function that allocates does not establish that Lean lacks the
+required ownership feature. Separate these possible causes:
+
+1. **Expressibility:** can a minimal direct or nested record update reuse the
+   exclusive record and mutable field at all?
+2. **Control-flow visibility:** does the real function join a grown/shared and
+   unchanged value before mutation, so the compiler no longer sees one linear
+   owner at the update?
+3. **Code placement:** does inlining recover an optimization locally while
+   duplicating ownership checks, branches, and fallback allocation throughout
+   a large caller?
+
+Build the smallest matrix that preserves the suspected structure rather than a
+semantically unrelated microbenchmark:
+
+- direct field update and one- or two-level nested record update;
+- mutation inside each control-flow branch and mutation after branches rejoin;
+- default, `@[inline]`, and `@[noinline]` helper placement where relevant.
+
+Inspect both the small mutator and its representative caller. Count exclusive
+reuse, fallback allocation, retains/releases, and generated/native code size.
+Then run the normal workload. A branch-local form can restore exclusive reuse,
+while `@[noinline]` can outperform the equivalent inline form by preventing
+that machinery from being duplicated across a dispatcher.
+
+Treat a native helper as a performance ceiling, not proof that the same shape
+is impossible in Lean. Escalate a compiler feature request only after the
+faithful matrix fails for a specific ownership boundary on the active Lean
+version.
+
 ## Lean Optimization Heuristics
 
 Prefer changes that consume and rebuild state narrowly:
@@ -135,6 +168,8 @@ Be skeptical of:
 - source-only ownership assertions;
 - changes that improve instructions but inflate cycles through code size or
   branch behavior;
+- claims that a language feature is missing when only a joined or aggressively
+  inlined source shape was tested;
 - data-structure sharding that masks copying but no longer models the intended
   semantics;
 - tiny fast paths that recognize one benchmark rather than improving the normal

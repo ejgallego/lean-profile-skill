@@ -109,6 +109,22 @@ perf report --stdio --no-children -i "$profile_run_dir/perf.data" \
 Use `--no-children` to see self-time target candidates. Use children-inclusive
 views after the self-time view tells you which region matters.
 
+If the command launches the real workload through `env`, a shell script, a
+daemon client, or another wrapper, verify the profiler follows the intended
+descendant. Choose the harness's inherited/child-recording mode or record the
+target executable directly. Immediately sanity-check the capture:
+
+```bash
+perf script -i "$profile_run_dir/perf.data" | head
+perf script -i "$profile_run_dir/perf.data" | \
+  rg -m 20 '<target-binary>|<project-symbol>|lean_'
+```
+
+Reject a capture whose samples are only loader, wrapper, shell-wait, or launcher
+frames. File size and sample count alone do not validate attribution. Likewise,
+an empty `perf report` is a failed preflight even if `perf record` exited zero;
+check event compatibility and inspect `perf script` before continuing.
+
 4. Use counters only after attribution:
 
 ```bash
@@ -198,6 +214,8 @@ C/runtime evidence shows that ownership is unchanged.
 
 Before acting on a sampled profile:
 
+- confirm the sampled process names and mapped binaries include the intended
+  executable or descendants;
 - check `file .lake/build/bin/<exe>` reports symbols/debug info when expected;
 - check `nm -n .lake/build/bin/<exe> | rg 'lean_|<project symbol>'`;
 - reject call chains with large `[unknown]` sections, small integer return

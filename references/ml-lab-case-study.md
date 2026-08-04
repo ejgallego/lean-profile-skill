@@ -105,12 +105,29 @@ Durable wins came from:
 - careful generated-C ownership inspection followed by representative
   diagnostics-off acceptance runs.
 
+The pure Lean `PUSHACC` recovery is the canonical source-shape lesson. A
+normalize-then-update `RawStack.push` joined the grown and unchanged stacks
+before its nested array update, and the resulting generated code missed the
+useful ownership path. Moving the update into each branch restored exclusive
+record/array reuse. Marking that helper inline then enlarged generated code and
+regressed the screen; keeping it noinline preserved reuse without duplicating
+the machinery through the dispatcher. The resulting pure Lean path retired
+essentially the same number of instructions as the native-assisted baseline on
+the regular Rocq Prelude workload while removing the semantic C override.
+
+This corrected an earlier, overly broad diagnosis that Lean lacked the needed
+nested record update. The durable procedure is to distinguish expressibility,
+control-flow visibility, and code placement before proposing compiler work or
+retaining a C override.
+
 Strong anti-patterns:
 
 - counter-first investigations for Lean target selection;
 - flat heap array replacement and heap pre-sizing without faithful runtime
   justification;
 - narrow helper factoring that looks cleaner but regresses generated code;
+- treating a native performance ceiling as evidence that an ownership pattern
+  cannot be expressed efficiently in Lean;
 - zero-length byte-slice skips that do not move real workloads;
 - byte payload side stores, heap chunking, page tables, or sharding as faithful
   fixes when they split the modeled heap object away from upstream semantics;

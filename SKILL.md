@@ -26,6 +26,12 @@ ownership path that made it expensive. Use sampled profiles and generated C/IR
 for attribution. Use counters only after that, as coarse acceptance or
 regression evidence from an established harness.
 
+Do not infer a missing Lean ownership feature from one slow source shape.
+Separate three questions: whether Lean can express the exclusive update,
+whether control flow keeps the owned token visible at the mutation, and whether
+inlining or specialization duplicates too much generated code. Test those
+dimensions explicitly before proposing a compiler feature or native override.
+
 ## Workflow
 
 1. Define the workload before profiling.
@@ -59,6 +65,8 @@ regression evidence from an established harness.
 4. Collect attribution with native profilers.
    - Use `perf record`, flamegraphs, or `samply` to choose targets.
    - Start with self time, then inspect children and callers.
+   - Validate that samples come from the intended process or descendants, not
+     only a launcher or waiting parent. A non-empty profile file is not enough.
    - Validate symbol and call-chain quality before trusting caller stacks.
    - Use frame-pointer builds only as an attribution aid unless the project
      already treats them as its normal benchmark build.
@@ -73,6 +81,9 @@ regression evidence from an established harness.
    - Source-level uniqueness probes are not enough for Lean performance claims.
    - Draw the ownership graph through the entire call chain, including result
      variants, error paths, callbacks, and closure captures.
+   - Before concluding that Lean lacks an ownership operation, compare a small
+     faithful source-shape matrix: direct versus nested update, branch-local
+     versus post-join update, and inline versus noinline helper placement.
    - Check generated C for runtime calls and ownership shape, then confirm with
      sampled profiles and harness-level acceptance numbers.
 
