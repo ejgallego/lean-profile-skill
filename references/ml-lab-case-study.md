@@ -34,11 +34,11 @@ Run the standard diagnostics-off comparison:
 ./scripts/profile-workload.sh compare_diagnostics_off
 ```
 
-For landing-quality evidence, use order-balanced passes and validate the
-captured identities:
+For landing-quality evidence, use multiple complete order-balanced cycles and
+validate the captured identities:
 
 ```bash
-./scripts/profile-workload.sh compare_diagnostics_off --compare-passes 2 \
+./scripts/profile-workload.sh compare_diagnostics_off --compare-passes 10 \
   --out-dir _build/profile-workload-compare/candidate
 python3 scripts/perf-comparison.py validate \
   _build/profile-workload-compare/candidate/comparison.json --strict

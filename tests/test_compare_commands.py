@@ -24,6 +24,7 @@ class CompareCommandsTests(unittest.TestCase):
         candidate: list[str],
         out_dir: str = "evidence",
         extra_args: list[str] | None = None,
+        env: dict[str, str] | None = None,
     ) -> subprocess.CompletedProcess[str]:
         command = [
             sys.executable,
@@ -37,9 +38,13 @@ class CompareCommandsTests(unittest.TestCase):
         ]
         if extra_args:
             command.extend(extra_args)
+        environment = os.environ.copy()
+        if env:
+            environment.update(env)
         return subprocess.run(
             command,
             cwd=cwd,
+            env=environment,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -190,6 +195,54 @@ class CompareCommandsTests(unittest.TestCase):
             self.assertIn("positive even number", result.stderr)
             self.assertFalse((cwd / "evidence").exists())
 
+    @unittest.skipUnless(os.name == "posix", "executable permission is POSIX-specific")
+    def test_non_executable_command_is_refused_during_preflight(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            cwd = Path(temporary)
+            command = cwd / "not-executable"
+            command.write_text("not executable\n", encoding="utf-8")
+            command.chmod(0o644)
+
+            result = self.run_compare(
+                cwd,
+                baseline=[str(command)],
+                candidate=[sys.executable, "-c", "pass"],
+            )
+
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("executable is not executable", result.stderr)
+            self.assertNotIn("Traceback", result.stderr)
+            self.assertFalse((cwd / "evidence").exists())
+
+    @unittest.skipUnless(os.name == "posix", "invalid shebang behavior is POSIX-specific")
+    def test_launch_error_preserves_structured_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            cwd = Path(temporary)
+            command = cwd / "invalid-interpreter"
+            command.write_text("#!/definitely/missing/interpreter\n", encoding="utf-8")
+            command.chmod(0o755)
+
+            result = self.run_compare(
+                cwd,
+                baseline=[str(command)],
+                candidate=[sys.executable, "-c", "pass"],
+                extra_args=["--passes", "2", "--warmups", "0"],
+            )
+
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("baseline measured run failed", result.stderr)
+            self.assertNotIn("Traceback", result.stderr)
+            evidence = cwd / "evidence"
+            rows = self.read_jsonl(evidence / "runs.jsonl")
+            self.assertEqual(len(rows), 1)
+            self.assertFalse(rows[0]["timed_out"])
+            self.assertIsNone(rows[0]["exit_code"])
+            self.assertIn("FileNotFoundError", rows[0]["launch_error"])
+            run_stderr = evidence / str(rows[0]["stderr"])
+            self.assertIn("FileNotFoundError", run_stderr.read_text(encoding="utf-8"))
+            identity_check = self.read_json(evidence / "identity-check.json")
+            self.assertTrue(identity_check["valid"])
+
     def test_duplicate_metadata_keys_are_refused(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             cwd = Path(temporary)
@@ -227,6 +280,72 @@ class CompareCommandsTests(unittest.TestCase):
                 summary["warnings"],
             )
             self.assertIn("Baseline and candidate argv are identical", result.stderr)
+
+    def test_expected_nonzero_exit_code_can_succeed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            cwd = Path(temporary)
+            command = [sys.executable, "-c", "raise SystemExit(7)"]
+            result = self.run_compare(
+                cwd,
+                baseline=command,
+                candidate=command,
+                extra_args=[
+                    "--passes",
+                    "2",
+                    "--warmups",
+                    "0",
+                    "--expected-exit-code",
+                    "7",
+                ],
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            rows = self.read_jsonl(cwd / "evidence" / "runs.jsonl")
+            self.assertEqual([row["exit_code"] for row in rows], [7, 7, 7, 7])
+
+    @unittest.skipUnless(os.name == "posix", "fake perf executable uses a POSIX shebang")
+    def test_perf_wrapper_preserves_one_counter_file_per_measured_run(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            cwd = Path(temporary)
+            perf = cwd / "perf"
+            perf.write_text(
+                "#!/usr/bin/env python3\n"
+                "import pathlib, subprocess, sys\n"
+                "if sys.argv[1:] == ['--version']:\n"
+                "    print('perf version test-double')\n"
+                "    raise SystemExit(0)\n"
+                "args = sys.argv[1:]\n"
+                "output = pathlib.Path(args[args.index('-o') + 1])\n"
+                "output.write_text('fake counters\\n', encoding='utf-8')\n"
+                "separator = args.index('--')\n"
+                "raise SystemExit(subprocess.run(args[separator + 1:]).returncode)\n",
+                encoding="utf-8",
+            )
+            perf.chmod(0o755)
+
+            result = self.run_compare(
+                cwd,
+                baseline=[sys.executable, "-c", "pass"],
+                candidate=[sys.executable, "-c", "pass"],
+                extra_args=[
+                    "--passes",
+                    "2",
+                    "--warmups",
+                    "0",
+                    "--perf-events",
+                    "cycles:u,instructions:u",
+                ],
+                env={"PATH": f"{cwd}{os.pathsep}{os.environ.get('PATH', '')}"},
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            evidence = cwd / "evidence"
+            manifest = self.read_json(evidence / "manifest.json")
+            self.assertEqual(manifest["perf"]["version"], "perf version test-double")
+            rows = self.read_jsonl(evidence / "runs.jsonl")
+            counter_paths = [evidence / str(row["perf_stat"]) for row in rows]
+            self.assertEqual(len(counter_paths), 4)
+            self.assertTrue(all(path.read_text() == "fake counters\n" for path in counter_paths))
 
     def test_artifact_drift_invalidates_a_completed_comparison(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -318,7 +437,8 @@ class CompareCommandsTests(unittest.TestCase):
             cwd = Path(temporary)
             leaked_marker = cwd / "descendant-survived"
             descendant = (
-                "import pathlib,time;"
+                "import pathlib,signal,time;"
+                "signal.signal(signal.SIGTERM, signal.SIG_IGN);"
                 "time.sleep(0.4);"
                 f"pathlib.Path({str(leaked_marker)!r}).write_text('leaked')"
             )

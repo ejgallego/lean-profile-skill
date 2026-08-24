@@ -56,7 +56,9 @@ Use AB/BA or another order-balanced schedule when comparing noisy elapsed
 times. Preserve pass and sequence columns so aggregation cannot silently keep
 only the final run. Report the paired deltas and raw distribution, and mark the
 result inconclusive when the claimed effect is not distinguishable from
-run-order or observed noise. Keep one-pass runs available for quick screening.
+run-order or observed noise. A repository-specific harness may retain one-pass
+runs for quick screening; the bundled helper requires a complete AB/BA cycle and
+therefore starts at two passes.
 
 If the repository has no comparison harness, resolve this skill directory and
 use `scripts/compare_commands.py`. It refuses to overwrite an existing output

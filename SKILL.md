@@ -17,7 +17,7 @@ builds, or general `lake build` latency, stop this workflow and begin with
 skill only if that investigation identifies native executable runtime as the
 cost surface.
 
-## Prominent Lesson
+## Core Lessons
 
 Do not use a counter-first strategy for Lean performance work. It has failed in
 practice: runtime counters, helper timers, and aggregate hardware counters tend
@@ -59,8 +59,6 @@ dimensions explicitly before proposing a compiler feature or native override.
    - If no comparison harness exists, use the bundled
      `scripts/compare_commands.py` to preserve order-balanced raw runs and
      command identities.
-   - If no harness exists, record a sampled profile first; do not build a local
-     counter instrumentation plan as the first move.
 
 4. Collect attribution with native profilers.
    - Use `perf record`, flamegraphs, or `samply` to choose targets.
@@ -81,9 +79,6 @@ dimensions explicitly before proposing a compiler feature or native override.
    - Source-level uniqueness probes are not enough for Lean performance claims.
    - Draw the ownership graph through the entire call chain, including result
      variants, error paths, callbacks, and closure captures.
-   - Before concluding that Lean lacks an ownership operation, compare a small
-     faithful source-shape matrix: direct versus nested update, branch-local
-     versus post-join update, and inline versus noinline helper placement.
    - Check generated C for runtime calls and ownership shape, then confirm with
      sampled profiles and harness-level acceptance numbers.
 
@@ -122,8 +117,6 @@ dimensions explicitly before proposing a compiler feature or native override.
   workload-specific fast paths unless the user explicitly wants an experiment.
 - Keep diagnostics, logging, tracing, and ownership probes out of headline
   benchmark mode unless the run is measuring their overhead.
-- Do not add local runtime counters to discover Lean hotspots unless the user
-  explicitly requests an experiment; prefer native samples and generated C/IR.
 - Label hashes, generated code, and code size as deterministic evidence. Label
   timing, counters, and sampled profiles as noisy evidence; do not merge their
   confidence claims.

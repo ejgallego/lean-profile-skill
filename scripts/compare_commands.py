@@ -76,6 +76,8 @@ def resolve_executable(command: list[str], cwd: Path) -> Path:
         resolved = Path(found).resolve()
     if not resolved.is_file():
         raise FileNotFoundError(f"executable is not a file: {resolved}")
+    if os.name == "posix" and not os.access(resolved, os.X_OK):
+        raise PermissionError(f"executable is not executable: {resolved}")
     return resolved
 
 
@@ -199,28 +201,29 @@ def check_identity(
 
 
 def terminate_process_group(process: subprocess.Popen[bytes]) -> None:
-    if process.poll() is not None:
-        return
     if os.name == "posix":
         try:
             os.killpg(process.pid, signal.SIGTERM)
         except ProcessLookupError:
-            return
+            pass
     else:
+        if process.poll() is not None:
+            return
         process.terminate()
     try:
-        process.wait(timeout=1.0)
-        return
+        process.wait(timeout=0.2)
     except subprocess.TimeoutExpired:
         pass
     if os.name == "posix":
         try:
             os.killpg(process.pid, signal.SIGKILL)
         except ProcessLookupError:
-            return
+            pass
     else:
-        process.kill()
-    process.wait()
+        if process.poll() is None:
+            process.kill()
+    if process.poll() is None:
+        process.wait()
 
 
 def summarize(values: list[int]) -> dict[str, float | int]:
@@ -404,23 +407,29 @@ def main() -> int:
         started_at = dt.datetime.now(dt.timezone.utc).isoformat()
         started_ns = time.perf_counter_ns()
         timed_out = False
+        launch_error = None
+        exit_code = None
         with stdout_path.open("wb") as stdout, stderr_path.open("wb") as stderr:
-            process = subprocess.Popen(
-                invoked,
-                cwd=cwd,
-                stdout=stdout,
-                stderr=stderr,
-                start_new_session=os.name == "posix",
-            )
             try:
-                exit_code = process.wait(timeout=args.timeout_seconds)
-            except subprocess.TimeoutExpired:
-                timed_out = True
-                terminate_process_group(process)
-                exit_code = None
-            except KeyboardInterrupt:
-                terminate_process_group(process)
-                raise
+                process = subprocess.Popen(
+                    invoked,
+                    cwd=cwd,
+                    stdout=stdout,
+                    stderr=stderr,
+                    start_new_session=os.name == "posix",
+                )
+            except OSError as error:
+                launch_error = f"{type(error).__name__}: {error}"
+                stderr.write((launch_error + "\n").encode())
+            else:
+                try:
+                    exit_code = process.wait(timeout=args.timeout_seconds)
+                except subprocess.TimeoutExpired:
+                    timed_out = True
+                    terminate_process_group(process)
+                except KeyboardInterrupt:
+                    terminate_process_group(process)
+                    raise
         elapsed_ns = time.perf_counter_ns() - started_ns
         row = {
             "sequence": sequence,
@@ -433,6 +442,7 @@ def main() -> int:
             "elapsed_ns": elapsed_ns,
             "exit_code": exit_code,
             "timed_out": timed_out,
+            "launch_error": launch_error,
             "stdout": str(stdout_path.relative_to(out_dir)),
             "stderr": str(stderr_path.relative_to(out_dir)),
             "perf_stat": str(counter_path.relative_to(out_dir)) if counter_path else None,
@@ -440,7 +450,7 @@ def main() -> int:
         rows.append(row)
         with (out_dir / "runs.jsonl").open("a", encoding="utf-8") as stream:
             stream.write(json.dumps(row, sort_keys=True) + "\n")
-        return not timed_out and exit_code == args.expected_exit_code
+        return not timed_out and launch_error is None and exit_code == args.expected_exit_code
 
     for warmup in range(1, args.warmups + 1):
         for slot, label in enumerate(("baseline", "candidate"), start=1):

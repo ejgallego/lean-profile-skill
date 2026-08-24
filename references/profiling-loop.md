@@ -185,7 +185,9 @@ output directory and stores raw JSONL rows, command and artifact identities,
 dirty tracked patches, stdout/stderr, paired deltas, and warnings about short or
 minimally repeated runs. It rechecks executable, artifact, Git revision, and
 tracked-diff identities after execution, writes `identity-check.json`, and
-returns failure if any of them drifted.
+returns failure if any of them drifted. Run rows distinguish ordinary exit,
+timeout, and launch failure. On POSIX systems, a timeout terminates the command's
+process group so descendant work does not contaminate later measurements.
 
 Pass `--perf-events` with
 `cycles:u,instructions:u,branches:u,branch-misses:u,cache-references:u` only
