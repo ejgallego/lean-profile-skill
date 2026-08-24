@@ -15,6 +15,8 @@ import statistics
 import subprocess
 import sys
 import time
+from collections.abc import Iterator
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -130,32 +132,34 @@ def command_identity(command: list[str], cwd: Path) -> dict[str, Any]:
 def check_identity(
     cwd: Path,
     commands: dict[str, dict[str, Any]],
+    tools: dict[str, dict[str, Any]],
     artifacts: list[dict[str, str]],
     git: dict[str, Any] | None,
 ) -> dict[str, Any]:
     changes: list[dict[str, Any]] = []
 
-    for label, before in commands.items():
-        before_identity = {
-            "executable": before["executable"],
-            "executable_sha256": before["executable_sha256"],
-        }
-        try:
-            current = command_identity(before["argv"], cwd)
-            after_identity = {
-                "executable": current["executable"],
-                "executable_sha256": current["executable_sha256"],
+    for subject_prefix, identities in (("command", commands), ("tool", tools)):
+        for label, before in identities.items():
+            before_identity = {
+                "executable": before["executable"],
+                "executable_sha256": before["executable_sha256"],
             }
-        except (FileNotFoundError, OSError) as error:
-            after_identity = {"error": str(error)}
-        if after_identity != before_identity:
-            changes.append(
-                {
-                    "subject": f"command:{label}",
-                    "before": before_identity,
-                    "after": after_identity,
+            try:
+                current = command_identity(before["argv"], cwd)
+                after_identity = {
+                    "executable": current["executable"],
+                    "executable_sha256": current["executable_sha256"],
                 }
-            )
+            except (FileNotFoundError, OSError) as error:
+                after_identity = {"error": str(error)}
+            if after_identity != before_identity:
+                changes.append(
+                    {
+                        "subject": f"{subject_prefix}:{label}",
+                        "before": before_identity,
+                        "after": after_identity,
+                    }
+                )
 
     for before in artifacts:
         path = Path(before["path"])
@@ -226,6 +230,148 @@ def terminate_process_group(process: subprocess.Popen[bytes]) -> None:
         process.wait()
 
 
+@dataclass(frozen=True)
+class RunContext:
+    cwd: Path
+    out_dir: Path
+    baseline: list[str]
+    candidate: list[str]
+    expected_exit_code: int
+    timeout_seconds: float | None
+    perf: str | None
+    perf_events: str | None
+
+
+@dataclass(frozen=True)
+class RunOutcome:
+    row: dict[str, Any]
+    succeeded: bool
+    interrupted: bool
+
+
+def perf_stat_identity(path: Path, out_dir: Path) -> tuple[str | None, str | None]:
+    relative_path = path.relative_to(out_dir)
+    try:
+        if not path.exists():
+            return None, f"perf stat evidence missing: {relative_path}"
+        if not path.is_file():
+            return None, f"perf stat evidence is not a file: {relative_path}"
+        if path.stat().st_size == 0:
+            return None, f"perf stat evidence is empty: {relative_path}"
+        return sha256_file(path), None
+    except OSError as error:
+        return None, f"cannot read perf stat evidence {relative_path}: {error}"
+
+
+def execute_run(
+    context: RunContext,
+    *,
+    label: str,
+    phase: str,
+    pass_number: int | None,
+    slot: int,
+    sequence: int,
+) -> RunOutcome:
+    command = context.baseline if label == "baseline" else context.candidate
+    stem = f"{sequence:03d}-{phase}-{label}"
+    stdout_path = context.out_dir / "stdout" / f"{stem}.txt"
+    stderr_path = context.out_dir / "stderr" / f"{stem}.txt"
+    counter_path = (
+        context.out_dir / "perf-stat" / f"{stem}.txt"
+        if context.perf and phase == "measured"
+        else None
+    )
+    invoked = command
+    if counter_path is not None:
+        assert context.perf is not None and context.perf_events is not None
+        invoked = [
+            context.perf,
+            "stat",
+            "-e",
+            context.perf_events,
+            "-o",
+            str(counter_path),
+            "--",
+            *command,
+        ]
+
+    started_at = dt.datetime.now(dt.timezone.utc).isoformat()
+    started_ns = time.perf_counter_ns()
+    timed_out = False
+    interrupted = False
+    launch_error = None
+    evidence_error = None
+    perf_stat_sha256 = None
+    exit_code = None
+    with stdout_path.open("wb") as stdout, stderr_path.open("wb") as stderr:
+        try:
+            process = subprocess.Popen(
+                invoked,
+                cwd=context.cwd,
+                stdout=stdout,
+                stderr=stderr,
+                start_new_session=os.name == "posix",
+            )
+        except OSError as error:
+            launch_error = f"{type(error).__name__}: {error}"
+            stderr.write((launch_error + "\n").encode())
+        else:
+            try:
+                exit_code = process.wait(timeout=context.timeout_seconds)
+            except subprocess.TimeoutExpired:
+                timed_out = True
+                terminate_process_group(process)
+            except KeyboardInterrupt:
+                interrupted = True
+                terminate_process_group(process)
+                stderr.write(b"comparison interrupted by SIGINT\n")
+
+        if (
+            counter_path is not None
+            and launch_error is None
+            and not timed_out
+            and not interrupted
+        ):
+            perf_stat_sha256, evidence_error = perf_stat_identity(
+                counter_path, context.out_dir
+            )
+            if evidence_error:
+                stderr.write((evidence_error + "\n").encode())
+
+    elapsed_ns = time.perf_counter_ns() - started_ns
+    row = {
+        "sequence": sequence,
+        "phase": phase,
+        "pass": pass_number,
+        "slot": slot,
+        "label": label,
+        "argv": command,
+        "started_at_utc": started_at,
+        "elapsed_ns": elapsed_ns,
+        "exit_code": exit_code,
+        "timed_out": timed_out,
+        "interrupted": interrupted,
+        "launch_error": launch_error,
+        "evidence_error": evidence_error,
+        "stdout": str(stdout_path.relative_to(context.out_dir)),
+        "stderr": str(stderr_path.relative_to(context.out_dir)),
+        "perf_stat": (
+            str(counter_path.relative_to(context.out_dir)) if counter_path else None
+        ),
+        "perf_stat_sha256": perf_stat_sha256,
+    }
+    with (context.out_dir / "runs.jsonl").open("a", encoding="utf-8") as stream:
+        stream.write(json.dumps(row, sort_keys=True) + "\n")
+    succeeded = (
+        not timed_out
+        and not interrupted
+        and launch_error is None
+        and evidence_error is None
+        and exit_code == context.expected_exit_code
+    )
+    return RunOutcome(row=row, succeeded=succeeded, interrupted=interrupted)
+
+
 def summarize(values: list[int]) -> dict[str, float | int]:
     return {
         "count": len(values),
@@ -235,6 +381,22 @@ def summarize(values: list[int]) -> dict[str, float | int]:
         "max_ns": max(values),
         "stdev_ns": statistics.stdev(values) if len(values) > 1 else 0.0,
     }
+
+
+def comparison_schedule(
+    passes: int, warmups: int
+) -> Iterator[tuple[str, int, int, str]]:
+    for warmup in range(1, warmups + 1):
+        for slot, label in enumerate(("baseline", "candidate"), start=1):
+            yield "warmup", warmup, slot, label
+    for pass_number in range(1, passes + 1):
+        order = (
+            ("baseline", "candidate")
+            if pass_number % 2
+            else ("candidate", "baseline")
+        )
+        for slot, label in enumerate(order, start=1):
+            yield "measured", pass_number, slot, label
 
 
 def main() -> int:
@@ -316,17 +478,30 @@ def main() -> int:
 
     perf = None
     perf_version = None
+    tools: dict[str, dict[str, Any]] = {}
     if args.perf_events:
-        perf = shutil.which("perf")
-        if perf is None:
+        perf_on_path = shutil.which("perf")
+        if perf_on_path is None:
             parser.error("--perf-events requires perf on PATH")
-        perf_version = subprocess.run(
-            [perf, "--version"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            check=False,
-        ).stdout.strip()
+        try:
+            perf_identity = command_identity([perf_on_path], cwd)
+            perf = perf_identity["executable"]
+            perf_version_result = subprocess.run(
+                [perf, "--version"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                check=False,
+            )
+        except OSError as error:
+            parser.error(f"cannot inspect perf: {error}")
+        if perf_version_result.returncode != 0:
+            parser.error(
+                "perf --version failed with exit code "
+                f"{perf_version_result.returncode}: {perf_version_result.stdout.strip()}"
+            )
+        perf_version = perf_version_result.stdout.strip()
+        tools["perf"] = perf_identity
 
     git, tracked_diff = git_identity(cwd)
     manifest = {
@@ -347,6 +522,7 @@ def main() -> int:
         "timeout_seconds": args.timeout_seconds,
         "perf": {
             "path": perf,
+            "executable_sha256": tools["perf"]["executable_sha256"],
             "version": perf_version,
             "events": args.perf_events,
             "inherit": True,
@@ -368,9 +544,19 @@ def main() -> int:
 
     rows: list[dict[str, Any]] = []
     sequence = 0
+    run_context = RunContext(
+        cwd=cwd,
+        out_dir=out_dir,
+        baseline=baseline,
+        candidate=candidate,
+        expected_exit_code=args.expected_exit_code,
+        timeout_seconds=args.timeout_seconds,
+        perf=perf,
+        perf_events=args.perf_events,
+    )
 
     def capture_identity_check() -> dict[str, Any]:
-        identity_check = check_identity(cwd, commands, artifacts, git)
+        identity_check = check_identity(cwd, commands, tools, artifacts, git)
         write_json(out_dir / "identity-check.json", identity_check)
         if not identity_check["valid"]:
             print(
@@ -379,96 +565,32 @@ def main() -> int:
             )
         return identity_check
 
-    def run_one(label: str, phase: str, pass_number: int | None, slot: int) -> bool:
-        nonlocal sequence
+    for phase, run_number, slot, label in comparison_schedule(
+        args.passes, args.warmups
+    ):
         sequence += 1
-        command = baseline if label == "baseline" else candidate
-        stem = f"{sequence:03d}-{phase}-{label}"
-        stdout_path = out_dir / "stdout" / f"{stem}.txt"
-        stderr_path = out_dir / "stderr" / f"{stem}.txt"
-        counter_path = (
-            out_dir / "perf-stat" / f"{stem}.txt"
-            if perf and phase == "measured"
-            else None
+        outcome = execute_run(
+            run_context,
+            label=label,
+            phase=phase,
+            pass_number=run_number,
+            slot=slot,
+            sequence=sequence,
         )
-        invoked = command
-        if counter_path is not None:
-            invoked = [
-                perf,
-                "stat",
-                "-e",
-                args.perf_events,
-                "-o",
-                str(counter_path),
-                "--",
-                *command,
-            ]
-
-        started_at = dt.datetime.now(dt.timezone.utc).isoformat()
-        started_ns = time.perf_counter_ns()
-        timed_out = False
-        launch_error = None
-        exit_code = None
-        with stdout_path.open("wb") as stdout, stderr_path.open("wb") as stderr:
-            try:
-                process = subprocess.Popen(
-                    invoked,
-                    cwd=cwd,
-                    stdout=stdout,
-                    stderr=stderr,
-                    start_new_session=os.name == "posix",
-                )
-            except OSError as error:
-                launch_error = f"{type(error).__name__}: {error}"
-                stderr.write((launch_error + "\n").encode())
-            else:
-                try:
-                    exit_code = process.wait(timeout=args.timeout_seconds)
-                except subprocess.TimeoutExpired:
-                    timed_out = True
-                    terminate_process_group(process)
-                except KeyboardInterrupt:
-                    terminate_process_group(process)
-                    raise
-        elapsed_ns = time.perf_counter_ns() - started_ns
-        row = {
-            "sequence": sequence,
-            "phase": phase,
-            "pass": pass_number,
-            "slot": slot,
-            "label": label,
-            "argv": command,
-            "started_at_utc": started_at,
-            "elapsed_ns": elapsed_ns,
-            "exit_code": exit_code,
-            "timed_out": timed_out,
-            "launch_error": launch_error,
-            "stdout": str(stdout_path.relative_to(out_dir)),
-            "stderr": str(stderr_path.relative_to(out_dir)),
-            "perf_stat": str(counter_path.relative_to(out_dir)) if counter_path else None,
-        }
-        rows.append(row)
-        with (out_dir / "runs.jsonl").open("a", encoding="utf-8") as stream:
-            stream.write(json.dumps(row, sort_keys=True) + "\n")
-        return not timed_out and launch_error is None and exit_code == args.expected_exit_code
-
-    for warmup in range(1, args.warmups + 1):
-        for slot, label in enumerate(("baseline", "candidate"), start=1):
-            if not run_one(label, "warmup", warmup, slot):
-                capture_identity_check()
-                print(f"{label} warmup failed; evidence preserved in {out_dir}", file=sys.stderr)
-                return 1
-
-    for pass_number in range(1, args.passes + 1):
-        order = ("baseline", "candidate") if pass_number % 2 else ("candidate", "baseline")
-        for slot, label in enumerate(order, start=1):
-            if not run_one(label, "measured", pass_number, slot):
-                capture_identity_check()
+        rows.append(outcome.row)
+        if not outcome.succeeded:
+            capture_identity_check()
+            if outcome.interrupted:
                 print(
-                    f"{label} measured run failed; evidence preserved in {out_dir}",
+                    f"comparison interrupted; evidence preserved in {out_dir}",
                     file=sys.stderr,
                 )
-                return 1
+                return 130
+            print(
+                f"{label} {phase} run failed; evidence preserved in {out_dir}",
+                file=sys.stderr,
+            )
+            return 1
 
     identity_check = capture_identity_check()
     measured = [row for row in rows if row["phase"] == "measured"]

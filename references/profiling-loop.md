@@ -183,16 +183,20 @@ count for acceptance work, and repeat `--artifact` for every relevant input.
 Use each `--metadata` key once. The script refuses to overwrite an existing
 output directory and stores raw JSONL rows, command and artifact identities,
 dirty tracked patches, stdout/stderr, paired deltas, and warnings about short or
-minimally repeated runs. It rechecks executable, artifact, Git revision, and
-tracked-diff identities after execution, writes `identity-check.json`, and
-returns failure if any of them drifted. Run rows distinguish ordinary exit,
-timeout, and launch failure. On POSIX systems, a timeout terminates the command's
-process group so descendant work does not contaminate later measurements.
+minimally repeated runs. It hashes the selected `perf` executable and rechecks
+command, profiler, artifact, Git revision, and tracked-diff identities after
+execution. Each completed profiler run must produce a nonempty counter file;
+the run row records its SHA-256. Missing evidence or identity drift makes the
+comparison fail while preserving `identity-check.json` and the partial run
+ledger. Run rows distinguish ordinary exit, timeout, launch failure, evidence
+failure, and interruption. An interrupted run exits 130 after recording its row
+and final identity check. On POSIX systems, timeout and interruption terminate
+the command's process group so descendant work does not contaminate later runs.
 
 Pass `--perf-events` with
 `cycles:u,instructions:u,branches:u,branch-misses:u,cache-references:u` only
 after sampled attribution identifies a target. The script then stores one
-counter file per scheduled run instead of collapsing repetitions into an
+counter file per measured run instead of collapsing repetitions into an
 aggregate.
 
 ## Phase Mapping

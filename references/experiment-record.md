@@ -52,7 +52,12 @@ example is the same object written compactly in JSONL:
   "endpoint": {"expected": "exit 0", "observed": "exit 0"},
   "attribution": "lean_copy_expand_array_nonlinear in updateState",
   "mechanism": "The candidate retained the old state through the result value.",
-  "results": {"raw": "_profiles/compare-001", "median_delta_percent": 1.2},
+  "results": {
+    "raw": "_profiles/compare-001",
+    "runs_jsonl": "_profiles/compare-001/runs.jsonl",
+    "paired_deltas_ns": [1200000, -300000, 800000, 1100000],
+    "summary": {"candidate_minus_baseline_median_percent": 1.2}
+  },
   "post_profile": "The original caller remained.",
   "correctness": [{"command": "lake test", "outcome": "passed"}],
   "decision": "Reject: ownership and representative runtime did not improve.",
@@ -67,10 +72,8 @@ example is the same object written compactly in JSONL:
 - Mark `rejected` when the mechanism is disproved, representative performance
   regresses, fidelity is weakened, or generated code moves contrary to the
   hypothesis.
-- Mark `inconclusive` when noise, identity drift, endpoint mismatch, or broken
-  call chains prevent a claim.
-- Mark `inconclusive` when a claimed timing effect is not distinguishable from
-  the observed run-order or paired-run variation.
+- Mark `inconclusive` when identity drift, endpoint mismatch, broken call
+  chains, noise, run-order effects, or paired-run variation prevent a claim.
 - Preserve rejected records and patches so the idea is not rediscovered as
   untried work.
 

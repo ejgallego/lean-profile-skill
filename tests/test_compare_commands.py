@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import signal
 import subprocess
 import sys
 import tempfile
@@ -16,16 +17,14 @@ COMPARE_SCRIPT = REPOSITORY_ROOT / "scripts" / "compare_commands.py"
 
 
 class CompareCommandsTests(unittest.TestCase):
-    def run_compare(
+    def compare_command(
         self,
-        cwd: Path,
         *,
         baseline: list[str],
         candidate: list[str],
         out_dir: str = "evidence",
         extra_args: list[str] | None = None,
-        env: dict[str, str] | None = None,
-    ) -> subprocess.CompletedProcess[str]:
+    ) -> list[str]:
         command = [
             sys.executable,
             str(COMPARE_SCRIPT),
@@ -38,11 +37,28 @@ class CompareCommandsTests(unittest.TestCase):
         ]
         if extra_args:
             command.extend(extra_args)
+        return command
+
+    def run_compare(
+        self,
+        cwd: Path,
+        *,
+        baseline: list[str],
+        candidate: list[str],
+        out_dir: str = "evidence",
+        extra_args: list[str] | None = None,
+        env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
         environment = os.environ.copy()
         if env:
             environment.update(env)
         return subprocess.run(
-            command,
+            self.compare_command(
+                baseline=baseline,
+                candidate=candidate,
+                out_dir=out_dir,
+                extra_args=extra_args,
+            ),
             cwd=cwd,
             env=environment,
             stdout=subprocess.PIPE,
@@ -81,6 +97,37 @@ class CompareCommandsTests(unittest.TestCase):
             check=True,
         )
         return tracked
+
+    def write_fake_perf(
+        self,
+        cwd: Path,
+        *,
+        counter_contents: str | None = "fake counters\n",
+        mutate_executable: bool = False,
+    ) -> Path:
+        perf = cwd / "perf"
+        perf.write_text(
+            "#!/usr/bin/env python3\n"
+            "import pathlib, subprocess, sys\n"
+            f"COUNTER_CONTENTS = {counter_contents!r}\n"
+            f"MUTATE_EXECUTABLE = {mutate_executable!r}\n"
+            "if sys.argv[1:] == ['--version']:\n"
+            "    print('perf version test-double')\n"
+            "    raise SystemExit(0)\n"
+            "args = sys.argv[1:]\n"
+            "output = pathlib.Path(args[args.index('-o') + 1])\n"
+            "if COUNTER_CONTENTS is not None:\n"
+            "    output.write_text(COUNTER_CONTENTS, encoding='utf-8')\n"
+            "separator = args.index('--')\n"
+            "returncode = subprocess.run(args[separator + 1:]).returncode\n"
+            "if MUTATE_EXECUTABLE:\n"
+            "    with pathlib.Path(__file__).open('a', encoding='utf-8') as stream:\n"
+            "        stream.write('# identity drift\\n')\n"
+            "raise SystemExit(returncode)\n",
+            encoding="utf-8",
+        )
+        perf.chmod(0o755)
+        return perf
 
     def test_success_preserves_schedule_metadata_artifacts_and_output(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -307,21 +354,7 @@ class CompareCommandsTests(unittest.TestCase):
     def test_perf_wrapper_preserves_one_counter_file_per_measured_run(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             cwd = Path(temporary)
-            perf = cwd / "perf"
-            perf.write_text(
-                "#!/usr/bin/env python3\n"
-                "import pathlib, subprocess, sys\n"
-                "if sys.argv[1:] == ['--version']:\n"
-                "    print('perf version test-double')\n"
-                "    raise SystemExit(0)\n"
-                "args = sys.argv[1:]\n"
-                "output = pathlib.Path(args[args.index('-o') + 1])\n"
-                "output.write_text('fake counters\\n', encoding='utf-8')\n"
-                "separator = args.index('--')\n"
-                "raise SystemExit(subprocess.run(args[separator + 1:]).returncode)\n",
-                encoding="utf-8",
-            )
-            perf.chmod(0o755)
+            perf = self.write_fake_perf(cwd)
 
             result = self.run_compare(
                 cwd,
@@ -342,10 +375,139 @@ class CompareCommandsTests(unittest.TestCase):
             evidence = cwd / "evidence"
             manifest = self.read_json(evidence / "manifest.json")
             self.assertEqual(manifest["perf"]["version"], "perf version test-double")
+            self.assertEqual(
+                manifest["perf"]["executable_sha256"],
+                hashlib.sha256(perf.read_bytes()).hexdigest(),
+            )
             rows = self.read_jsonl(evidence / "runs.jsonl")
             counter_paths = [evidence / str(row["perf_stat"]) for row in rows]
             self.assertEqual(len(counter_paths), 4)
             self.assertTrue(all(path.read_text() == "fake counters\n" for path in counter_paths))
+            self.assertEqual(
+                [row["perf_stat_sha256"] for row in rows],
+                [hashlib.sha256(path.read_bytes()).hexdigest() for path in counter_paths],
+            )
+            self.assertTrue(all(row["evidence_error"] is None for row in rows))
+
+    @unittest.skipUnless(os.name == "posix", "fake perf executable uses a POSIX shebang")
+    def test_missing_or_empty_perf_counter_fails_with_structured_evidence(self) -> None:
+        for expected_error, counter_contents in (("missing", None), ("empty", "")):
+            with self.subTest(expected_error=expected_error):
+                with tempfile.TemporaryDirectory() as temporary:
+                    cwd = Path(temporary)
+                    self.write_fake_perf(cwd, counter_contents=counter_contents)
+
+                    result = self.run_compare(
+                        cwd,
+                        baseline=[sys.executable, "-c", "pass"],
+                        candidate=[sys.executable, "-c", "pass"],
+                        extra_args=[
+                            "--passes",
+                            "2",
+                            "--warmups",
+                            "0",
+                            "--perf-events",
+                            "cycles:u",
+                        ],
+                        env={
+                            "PATH": f"{cwd}{os.pathsep}{os.environ.get('PATH', '')}"
+                        },
+                    )
+
+                    self.assertEqual(result.returncode, 1)
+                    self.assertNotIn("Traceback", result.stderr)
+                    evidence = cwd / "evidence"
+                    rows = self.read_jsonl(evidence / "runs.jsonl")
+                    self.assertEqual(len(rows), 1)
+                    self.assertIn(expected_error, rows[0]["evidence_error"])
+                    self.assertIsNone(rows[0]["perf_stat_sha256"])
+                    self.assertTrue(
+                        self.read_json(evidence / "identity-check.json")["valid"]
+                    )
+
+    @unittest.skipUnless(os.name == "posix", "fake perf executable uses a POSIX shebang")
+    def test_perf_executable_drift_invalidates_a_completed_comparison(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            cwd = Path(temporary)
+            self.write_fake_perf(cwd, mutate_executable=True)
+
+            result = self.run_compare(
+                cwd,
+                baseline=[sys.executable, "-c", "pass"],
+                candidate=[sys.executable, "-c", "pass"],
+                extra_args=[
+                    "--passes",
+                    "2",
+                    "--warmups",
+                    "0",
+                    "--perf-events",
+                    "cycles:u",
+                ],
+                env={"PATH": f"{cwd}{os.pathsep}{os.environ.get('PATH', '')}"},
+            )
+
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("identity drift detected", result.stderr)
+            evidence = cwd / "evidence"
+            identity_check = self.read_json(evidence / "identity-check.json")
+            self.assertFalse(identity_check["valid"])
+            self.assertEqual(
+                [change["subject"] for change in identity_check["changes"]],
+                ["tool:perf"],
+            )
+            self.assertFalse(self.read_json(evidence / "summary.json")["identity_check"]["valid"])
+
+    @unittest.skipUnless(os.name == "posix", "SIGINT handling is POSIX-specific")
+    def test_interrupt_preserves_run_and_identity_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            cwd = Path(temporary)
+            started = cwd / "started"
+            baseline = [
+                sys.executable,
+                "-c",
+                (
+                    "import pathlib,time;"
+                    f"pathlib.Path({str(started)!r}).write_text('started');"
+                    "time.sleep(5)"
+                ),
+            ]
+            process = subprocess.Popen(
+                self.compare_command(
+                    baseline=baseline,
+                    candidate=[sys.executable, "-c", "pass"],
+                    extra_args=["--passes", "2", "--warmups", "0"],
+                ),
+                cwd=cwd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            try:
+                deadline = time.monotonic() + 3
+                while (
+                    not started.exists()
+                    and process.poll() is None
+                    and time.monotonic() < deadline
+                ):
+                    time.sleep(0.01)
+                self.assertTrue(started.exists(), "comparison did not start its first command")
+                process.send_signal(signal.SIGINT)
+                _stdout, stderr = process.communicate(timeout=5)
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                    process.wait()
+
+            self.assertEqual(process.returncode, 130, stderr)
+            self.assertNotIn("Traceback", stderr)
+            evidence = cwd / "evidence"
+            rows = self.read_jsonl(evidence / "runs.jsonl")
+            self.assertEqual(len(rows), 1)
+            self.assertTrue(rows[0]["interrupted"])
+            self.assertIsNone(rows[0]["exit_code"])
+            self.assertFalse(rows[0]["timed_out"])
+            self.assertTrue(self.read_json(evidence / "identity-check.json")["valid"])
+            self.assertFalse((evidence / "summary.json").exists())
 
     def test_artifact_drift_invalidates_a_completed_comparison(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

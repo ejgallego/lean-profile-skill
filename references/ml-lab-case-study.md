@@ -122,7 +122,6 @@ retaining a C override.
 
 Strong anti-patterns:
 
-- counter-first investigations for Lean target selection;
 - flat heap array replacement and heap pre-sizing without faithful runtime
   justification;
 - narrow helper factoring that looks cleaner but regresses generated code;
