@@ -11,6 +11,7 @@ persistent array copies, or suspected missed in-place updates.
 - Runtime Symbols to Track
 - Inspection Pattern
 - Expressibility, Control Flow, and Code Placement
+- Compiler Optimization Levers
 - Lean Optimization Heuristics
 - Acceptance Evidence
 
@@ -33,9 +34,26 @@ Use the documented Lean-native diagnostics before dropping to generated C:
 - `dbgTraceIfShared "label" value` reports when `value` is shared, but run it in
   code that is explicitly compiled and executed; `#eval` can be misleading for
   this purpose.
-- `set_option trace.compiler.ir.result true` prints compiler IR where
-  allocation, reference counting, `isShared`, constructor field projection, and
-  `set x[n]` mutations are explicit.
+- `trace.Compiler.saveBase`, `trace.Compiler.saveMono`, and
+  `trace.Compiler.saveImpure` show the end of the corresponding compiler phase.
+- `trace.Compiler.result` shows final compiler IR where allocation, reference
+  counting, `isShared`, constructor field projection, and `set x[n]` mutations
+  are explicit.
+- `trace.Compiler.simp` and pass-specific traces can explain a transformation,
+  but they are much noisier than phase boundaries and final output.
+
+Enable binder and local-variable types when ownership is the question:
+
+```lean
+set_option pp.funBinderTypes true
+set_option pp.letVarTypes true
+set_option trace.Compiler.result true
+```
+
+Use one phase trace at a time unless comparing transformations across phases.
+The final IR distinguishes owned object arguments such as `obj`, borrowed object
+arguments such as `@&obj`, and scalar or tagged values. Generated C remains the
+more direct check for emitted runtime calls and wrapper behavior.
 
 Treat these as diagnostic surfaces, not acceptance evidence by themselves. For
 ml-lab-style runtime work, require agreement between IR/source diagnostics,
@@ -145,6 +163,48 @@ Treat a native helper as a performance ceiling, not proof that the same shape
 is impossible in Lean. Escalate a compiler feature request only after the
 faithful matrix fails for a specific ownership boundary on the active Lean
 version.
+
+## Compiler Optimization Levers
+
+Use annotations to test a profile-backed hypothesis, not as general decoration.
+On Lean 4.34.0-rc1 the inlining annotations have distinct meanings:
+
+| Lever | Compiler intent | Main risk to check |
+| --- | --- | --- |
+| `@[inline]` | Inline when the compiler considers it appropriate. | Larger callers or duplicated ownership paths. |
+| `@[always_inline]` | Always inline the definition. | Uncontrolled native-code growth. |
+| `@[macro_inline]` | Inline before ANF conversion, treating arguments lazily. Only valid for non-recursive definitions. | Changed evaluation shape and duplicated code. |
+| `@[noinline]` | Never inline the definition. | Lost specialization or missed simplification. |
+| `inline (f x)` | Force inlining at one call site. | A local win that does not generalize to other callers. |
+
+The unannotated compiler also opportunistically inlines very small functions;
+`compiler.small` defaults to `1` on the validated toolchain. Do not conclude
+that an annotation took effect from source shape. Inspect phase IR, final IR,
+generated C, and native symbol size.
+
+Specialization can remove closure and type-class dispatch when the concrete
+argument is visible:
+
+- `@[specialize]` requests specialization; by default its function and instance
+  parameters are candidates;
+- `@[specialize f]` names a particular parameter;
+- `@[nospecialize]` prevents specialization of a definition;
+- `@[weak_specialize]` marks a type whose parameters participate only when some
+  other argument already triggers specialization.
+
+Use `trace.Compiler.specialize.candidate`,
+`trace.Compiler.specialize.step`, or `trace.Compiler.specialize.info` when the
+final generated code does not explain why a candidate was or was not produced.
+Specialization and inlining can trade dispatch or allocation for code size, so
+measure the representative caller and binary rather than accepting fewer
+closures in isolation.
+
+Lean can explicitly borrow an ordinary function parameter with `@&`, for
+example `(xs : @& Array Nat)`. In final IR, verify the borrowed binder; in
+generated C, verify that the function itself does not consume the argument and
+that any boxed wrapper performs the required release. An explicit borrow can
+move an `inc` or `dec` rather than eliminate it when a downstream callee needs
+ownership, so compare the whole call chain.
 
 ## Lean Optimization Heuristics
 

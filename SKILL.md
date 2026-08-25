@@ -98,6 +98,9 @@ dimensions explicitly before proposing a compiler feature or native override.
 - Read [generated-c-ownership.md](references/generated-c-ownership.md) when the
   profile points at Lean runtime allocation, reference counting, persistent data
   structure copies, or suspected linearity issues.
+- Read [runtime-mechanics.md](references/runtime-mechanics.md) when interpreting
+  boxing or object-layout costs, atomic reference counting, task scheduling,
+  synchronization, or channel behavior before choosing an optimization.
 - Read [benchmark-design.md](references/benchmark-design.md) before adding or
   interpreting benchmark suites, focused fixtures, historical reports, or
   baseline/candidate comparisons.
