@@ -502,6 +502,12 @@ def main() -> int:
             )
         perf_version = perf_version_result.stdout.strip()
         tools["perf"] = perf_identity
+        warning = (
+            "Elapsed measurements include perf stat overhead; use a separate "
+            "comparison without --perf-events for headline timing."
+        )
+        preflight_warnings.append(warning)
+        print(f"warning: {warning}", file=sys.stderr)
 
     git, tracked_diff = git_identity(cwd)
     manifest = {
@@ -516,7 +522,12 @@ def main() -> int:
         "schedule": {"passes": args.passes, "warmups_per_command": args.warmups},
         "elapsed_measurement": {
             "clock": "time.perf_counter_ns",
-            "scope": "child-process wall time including process startup",
+            "scope": (
+                "perf stat wrapper wall time including profiler and target "
+                "process startup"
+                if perf
+                else "child-process wall time including process startup"
+            ),
         },
         "expected_exit_code": args.expected_exit_code,
         "timeout_seconds": args.timeout_seconds,

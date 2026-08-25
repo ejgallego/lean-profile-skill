@@ -8,7 +8,7 @@ workloads.
 - Workload Classes
 - Comparable Runs
 - Ranking Targets
-- Slices And Snapshots
+- Slices and Snapshots
 - Diagnostics
 - Historical Reports
 - Evidence Bundle
@@ -91,7 +91,7 @@ A good optimization story connects:
 - a correctness test or semantic invariant;
 - an explicit reason rejected alternatives are not being used.
 
-## Slices And Snapshots
+## Slices and Snapshots
 
 Slices are attribution tools. They are useful when a full run has too few
 samples or when setup dominates the profile. Do not land on slice evidence
@@ -106,7 +106,7 @@ Snapshot or replay systems must include enough identity to avoid stale reuse:
 
 ## Diagnostics
 
-Keep normal headline runs diagnostics-off. Enable diagnostics only when
+Disable diagnostics in normal headline runs. Enable them only when
 measuring diagnostic overhead or collecting targeted evidence.
 
 Examples of diagnostics:
@@ -133,7 +133,7 @@ For history sweeps:
 - use timeouts rather than blocking the whole sweep;
 - keep build-cache reuse separate from measured samples;
 - avoid comparing aggregate totals across corpus growth without a common-label
-  subset.
+  subset;
 - refresh a current-head report before choosing a target from old artifacts.
 
 ## Evidence Bundle

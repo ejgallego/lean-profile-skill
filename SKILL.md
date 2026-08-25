@@ -6,7 +6,7 @@ description: Profile and optimize the runtime of compiled Lean executables and t
 # Lean Native Runtime Profiling
 
 Use this skill to turn a vague Lean speed problem into comparable measurements,
-credible attribution, and a landable optimization story.
+credible attribution, and an optimization case that can be safely landed.
 
 ## Scope Gate
 
@@ -15,7 +15,7 @@ request concerns theorem or tactic elaboration, module compilation, dependency
 builds, or general `lake build` latency, stop this workflow and begin with
 `lean --profile`, the `profiler` options, or `trace.profiler`. Return to this
 skill only if that investigation identifies native executable runtime as the
-cost surface.
+source of the cost.
 
 ## Core Lessons
 
@@ -38,9 +38,9 @@ dimensions explicitly before proposing a compiler feature or native override.
    - Prefer a representative command the user actually cares about.
    - Add focused or micro workloads only after the representative run identifies
      a cost class.
-   - Record the command, input and binary hashes, commit/worktree state,
-     toolchain, build mode, diagnostics, event list, repeat policy, and expected
-     terminal state.
+   - Record the command, hashes for inputs and binaries, commit and worktree
+     state, toolchain, build mode, diagnostics, event list, repeat policy, and
+     expected terminal state.
 
 2. Map the workload phases before changing code.
    - Separate startup, loading, parsing, steady execution, and shutdown when the
@@ -64,7 +64,7 @@ dimensions explicitly before proposing a compiler feature or native override.
    - Use `perf record`, flamegraphs, or `samply` to choose targets.
    - Start with self time, then inspect children and callers.
    - Validate that samples come from the intended process or descendants, not
-     only a launcher or waiting parent. A non-empty profile file is not enough.
+     only a launcher or waiting parent. A nonempty profile file is not enough.
    - Validate symbol and call-chain quality before trusting caller stacks.
    - Use frame-pointer builds only as an attribution aid unless the project
      already treats them as its normal benchmark build.

@@ -173,6 +173,10 @@ class CompareCommandsTests(unittest.TestCase):
             manifest = self.read_json(evidence / "manifest.json")
             self.assertEqual(manifest["metadata"], {"build": "release"})
             self.assertEqual(
+                manifest["elapsed_measurement"]["scope"],
+                "child-process wall time including process startup",
+            )
+            self.assertEqual(
                 manifest["artifacts"],
                 [
                     {
@@ -375,6 +379,11 @@ class CompareCommandsTests(unittest.TestCase):
             evidence = cwd / "evidence"
             manifest = self.read_json(evidence / "manifest.json")
             self.assertEqual(manifest["perf"]["version"], "perf version test-double")
+            self.assertIn("perf stat wrapper", manifest["elapsed_measurement"]["scope"])
+            self.assertIn(
+                "separate comparison without --perf-events",
+                " ".join(manifest["warnings"]),
+            )
             self.assertEqual(
                 manifest["perf"]["executable_sha256"],
                 hashlib.sha256(perf.read_bytes()).hexdigest(),
@@ -388,6 +397,11 @@ class CompareCommandsTests(unittest.TestCase):
                 [hashlib.sha256(path.read_bytes()).hexdigest() for path in counter_paths],
             )
             self.assertTrue(all(row["evidence_error"] is None for row in rows))
+            summary = self.read_json(evidence / "summary.json")
+            self.assertIn(
+                "separate comparison without --perf-events",
+                " ".join(summary["warnings"]),
+            )
 
     @unittest.skipUnless(os.name == "posix", "fake perf executable uses a POSIX shebang")
     def test_missing_or_empty_perf_counter_fails_with_structured_evidence(self) -> None:

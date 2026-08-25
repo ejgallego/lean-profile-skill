@@ -1,4 +1,4 @@
 interface:
   display_name: "Lean Native Profiling"
   short_description: "Profile compiled Lean runtime and native code"
-  default_prompt: "Use $lean-profile-skill to diagnose this compiled Lean executable runtime regression."
+  default_prompt: "Use $lean-profile-skill to diagnose this runtime regression in a compiled Lean executable."

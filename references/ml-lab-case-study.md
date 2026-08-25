@@ -8,7 +8,7 @@ goal is faithful execution of an external runtime.
 - Operating Principle
 - Main Commands
 - Workload Interpretation
-- Lessons To Preserve
+- Lessons to Preserve
 - Attribution Rules
 - Landing Bar
 
@@ -81,7 +81,7 @@ Use `scripts/profile-workload.sh` modes such as `fib`, `array_set_bump`,
 `bytes_set_bump`, `offsetref_bump`, `unicode_table_fill`, `rocqworker`,
 `rocqworker_parent`, `rocq_coqtop_check_prop`,
 `rocq_coqtop_check_prop_parent`, `rocq_compile_simple`, and
-`rocq_compile_simple_parent` according to the target surface.
+`rocq_compile_simple_parent`, selecting the mode that matches the target.
 
 ## Workload Interpretation
 
@@ -93,7 +93,7 @@ Use `scripts/profile-workload.sh` modes such as `fib`, `array_set_bump`,
 - Expected fuel exhaustion at the same PC is a valid bounded profiling cutoff,
   not automatically a failure.
 
-## Lessons To Preserve
+## Lessons to Preserve
 
 Durable wins came from:
 
@@ -109,11 +109,12 @@ The pure Lean `PUSHACC` recovery is the canonical source-shape lesson. A
 normalize-then-update `RawStack.push` joined the grown and unchanged stacks
 before its nested array update, and the resulting generated code missed the
 useful ownership path. Moving the update into each branch restored exclusive
-record/array reuse. Marking that helper inline then enlarged generated code and
-regressed the screen; keeping it noinline preserved reuse without duplicating
-the machinery through the dispatcher. The resulting pure Lean path retired
-essentially the same number of instructions as the native-assisted baseline on
-the regular Rocq Prelude workload while removing the semantic C override.
+record and array reuse. Marking that helper `@[inline]` then enlarged generated
+code and regressed the screening benchmark; keeping it `@[noinline]` preserved
+reuse without duplicating the machinery through the dispatcher. On the regular
+Rocq Prelude workload, the resulting pure Lean path retired essentially the same
+number of instructions as the native-assisted baseline while removing the
+semantic C override.
 
 This corrected an earlier, overly broad diagnosis that Lean lacked the needed
 nested record update. The durable procedure is to distinguish expressibility,
@@ -166,7 +167,7 @@ Before landing an ml-lab performance change:
 - show same-machine before/after evidence on the representative workload;
 - use focused fixtures only as mechanism validation;
 - run the relevant correctness tests;
-- archive rejected ideas in the profile worktree or a short design note.
+- archive rejected ideas in the profile worktree or a short design note;
 - retain the comparison identity metadata and raw AB/BA rows;
 - collect a post-change profile and verify that the attributed caller moved;
 - include executable/symbol-size deltas when generated code placement changed.

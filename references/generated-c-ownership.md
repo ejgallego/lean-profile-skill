@@ -1,4 +1,4 @@
-# Generated C And Ownership
+# Generated C and Ownership
 
 Use this reference when a Lean profile points at allocation, reference counting,
 persistent array copies, or suspected missed in-place updates.
@@ -8,9 +8,9 @@ persistent array copies, or suspected missed in-place updates.
 - Rule
 - Upstream Lean Diagnostics
 - Locate Generated C
-- Runtime Symbols To Track
+- Runtime Symbols to Track
 - Inspection Pattern
-- Expressibility, Control Flow, And Code Placement
+- Expressibility, Control Flow, and Code Placement
 - Lean Optimization Heuristics
 - Acceptance Evidence
 
@@ -25,8 +25,8 @@ acceptance evidence.
 ## Upstream Lean Diagnostics
 
 Lean's reference-counting runtime can reuse memory and update arrays or strings
-in place when a value is uniquely referenced. When the value is shared, primitive
-updates may copy instead.
+in place when a value is uniquely referenced. When the value is shared,
+primitive updates may copy instead.
 
 Use the documented Lean-native diagnostics before dropping to generated C:
 
@@ -37,7 +37,7 @@ Use the documented Lean-native diagnostics before dropping to generated C:
   allocation, reference counting, `isShared`, constructor field projection, and
   `set x[n]` mutations are explicit.
 
-Treat these as diagnosis surfaces, not acceptance evidence by themselves. For
+Treat these as diagnostic surfaces, not acceptance evidence by themselves. For
 ml-lab-style runtime work, require agreement between IR/source diagnostics,
 generated C or runtime symbols, sampled profiles, and representative
 diagnostics-off results.
@@ -56,7 +56,7 @@ rg -n 'lean_copy_expand_array(_nonlinear)?|lean_array_set|lean_array_fset|lean_i
 If the function name is mangled, search for the Lean definition suffix, nearby
 module name fragments, or runtime calls visible in the profile.
 
-## Runtime Symbols To Track
+## Runtime Symbols to Track
 
 Treat the names below as search leads, not a stable ABI. Verify them against the
 active toolchain's runtime headers, generated C, and sampled native symbols.
@@ -114,7 +114,7 @@ perf report --stdio --no-children -i path/to/perf.data --percent-limit 0.0 | \
   rg 'lean_copy_expand_array(_nonlinear)?|lean_dec_ref_cold|myHelper'
 ```
 
-## Expressibility, Control Flow, And Code Placement
+## Expressibility, Control Flow, and Code Placement
 
 One generated function that allocates does not establish that Lean lacks the
 required ownership feature. Separate these possible causes:
@@ -136,10 +136,10 @@ semantically unrelated microbenchmark:
 - default, `@[inline]`, and `@[noinline]` helper placement where relevant.
 
 Inspect both the small mutator and its representative caller. Count exclusive
-reuse, fallback allocation, retains/releases, and generated/native code size.
-Then run the normal workload. A branch-local form can restore exclusive reuse,
-while `@[noinline]` can outperform the equivalent inline form by preventing
-that machinery from being duplicated across a dispatcher.
+reuse, fallback allocation, retains and releases, generated-C size, and native
+code size. Then run the normal workload. A branch-local form can restore
+exclusive reuse, while `@[noinline]` can outperform the equivalent inline form
+by preventing that machinery from being duplicated across a dispatcher.
 
 Treat a native helper as a performance ceiling, not proof that the same shape
 is impossible in Lean. Escalate a compiler feature request only after the
@@ -160,7 +160,7 @@ Prefer changes that consume and rebuild state narrowly:
   current state when that removes a real retained owner;
 - eliminate callback/closure captures that keep the old state live across a
   successful mutation;
-- verify in generated C that a nicer source shape did not produce larger or
+- verify in generated C that a cleaner source shape did not produce larger or
   slower code.
 
 Be skeptical of:

@@ -16,8 +16,8 @@ Use this reference for the concrete mechanics of profiling Lean executables.
 
 ## Backend Preflight
 
-Prefer a repository's established profiling harness. Otherwise select a native
-sampling backend before changing build flags:
+Prefer a repository's established profiling harness. Otherwise, select a native
+sampling backend before changing build flags.
 
 The command examples in this reference use POSIX shell syntax. Translate command
 discovery, variables, and redirection when working on Windows even though
@@ -70,15 +70,16 @@ file .lake/build/bin/<exe>
 ```
 
 Lake normally places executables under `.lake/build/bin` and generated
-intermediate artifacts, primarily C code, under `.lake/build/ir`. Keep the
-build type explicit when it matters:
+intermediate artifacts, primarily C code, under `.lake/build/ir`.
 
 Hash the executable and every relevant input after the build. The bundled
 comparison script records SHA-256 identities for both executables and every
 file passed through `--artifact`; when working manually, use the platform's
 available SHA-256 tool.
 
-- `release` is the normal headline benchmark shape;
+Keep the build type explicit when it matters:
+
+- `release` is the standard build for headline benchmarks;
 - `debug` uses `-O0 -g` and is for debugging/attribution, not headline speed;
 - `relWithDebInfo` keeps optimization with debug info and can be useful for
   attribution if the project supports it;
@@ -140,7 +141,7 @@ below. Keep warmups separate from measured samples. Treat counters as acceptance
 or regression evidence after a target is known, not as the way to find the
 target.
 
-5. Render flamegraphs when visual call paths help:
+5. Render flamegraphs when visual call paths would help:
 
 ```bash
 perf script -i "$profile_run_dir/perf.data" > "$profile_run_dir/perf.script"
@@ -158,7 +159,7 @@ samply record --save-only -o "$profile_run_dir/profile.json.gz" -- \
 ```
 
 Use `samply load "$profile_run_dir/profile.json.gz"` later when interactive
-browsing is wanted. `--no-open` alone still starts a local server and can block
+browsing is useful. `--no-open` alone still starts a local server and can block
 an unattended agent.
 
 ## Order-Balanced Comparison
@@ -195,9 +196,12 @@ the command's process group so descendant work does not contaminate later runs.
 
 Pass `--perf-events` with
 `cycles:u,instructions:u,branches:u,branch-misses:u,cache-references:u` only
-after sampled attribution identifies a target. The script then stores one
-counter file per measured run instead of collapsing repetitions into an
-aggregate.
+after sampled attribution identifies a target. Collect headline elapsed times
+in a comparison without `--perf-events`, then use a separate output directory
+for the counter run. The script stores one counter file per measured run instead
+of collapsing repetitions into an aggregate. Because `perf stat` can perturb
+runtime, treat elapsed values from the counter run as diagnostics rather than
+headline timings.
 
 ## Phase Mapping
 
