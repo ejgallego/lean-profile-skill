@@ -1,26 +1,31 @@
 ---
 name: lean-profile-skill
-description: Profile and optimize the runtime of compiled Lean executables and their generated native code. Use when Codex needs to diagnose executable runtime regressions, compare baseline and candidate binaries, collect perf or samply evidence, inspect generated C for ownership/allocation behavior, design native-runtime benchmarks, or document accepted and rejected runtime optimizations. Do not use as the first-line workflow for theorem or tactic elaboration, module compilation, or general Lake build-time profiling.
+description: Investigate Lean performance with separate workflows for public build/edit-to-output latency, module elaboration, and compiled native runtime. Use for measured experiments, Lean or Lake phase attribution, perf/samply and generated-C analysis. Start build and elaboration investigations with Lake and Lean frontend evidence; use native sampling after locating a substantial native runtime cost.
 ---
 
-# Lean Native Runtime Profiling
+# Lean Performance Profiling
 
 Use this skill to turn a vague Lean speed problem into comparable measurements,
 credible attribution, and an optimization case that can be safely landed.
 
-## Scope Gate
+## Choose the timing boundary
 
-Confirm that the slow region occurs while running compiled Lean code. If the
-request concerns theorem or tactic elaboration, module compilation, dependency
-builds, or general `lake build` latency, stop this workflow and begin with
-`lean --profile`, the `profiler` options, or `trace.profiler`. Return to this
-skill only if that investigation identifies native executable runtime as the
-source of the cost.
+- For public build latency, edit-to-output, Lake planning or module elaboration,
+  read [build-and-elaboration.md](references/build-and-elaboration.md). Start with
+  the public command, affected jobs and Lean frontend evidence.
+- For Verso documents, also read [verso-builds.md](references/verso-builds.md) for
+  authored-module compilation, generator execution and project-specific checks.
+- For compiled executable runtime and generated native code, use the native
+  workflow below. Enter it from a build investigation when native execution is
+  a substantial part of the public wall time.
 
-## Core Lessons
+Keep public commands, nested module diagnostics and direct executable timings
+separate. Another project's hotspot is a hypothesis, not evidence for this one.
 
-Do not use a counter-first strategy for Lean performance work. It has failed in
-practice: runtime counters, helper timers, and aggregate hardware counters tend
+## Native runtime lessons
+
+Do not use a counter-first strategy for native runtime optimization. Runtime
+counters, helper timers, and aggregate hardware counters tend
 to say that something is expensive without identifying the compiler/runtime
 ownership path that made it expensive. Use sampled profiles and generated C/IR
 for attribution. Use counters only after that, as coarse acceptance or
@@ -32,7 +37,7 @@ whether control flow keeps the owned token visible at the mutation, and whether
 inlining or specialization duplicates too much generated code. Test those
 dimensions explicitly before proposing a compiler feature or native override.
 
-## Workflow
+## Native runtime workflow
 
 1. Define the workload before profiling.
    - Prefer a representative command the user actually cares about.
@@ -90,7 +95,7 @@ dimensions explicitly before proposing a compiler feature or native override.
      cost bucket moved as predicted.
    - Document failed candidates so future work does not rediscover them.
 
-## Reference Routing
+## Native reference routing
 
 - Read [profiling-loop.md](references/profiling-loop.md) for concrete `perf`,
   flamegraph, `samply`, frame-pointer, and measurement-loop commands, plus the

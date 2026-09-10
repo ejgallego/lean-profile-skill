@@ -1,7 +1,7 @@
 # Lean Profile Skill
 
-A Codex skill for profiling and optimizing compiled Lean executables and their
-generated native code. See [SKILL.md](SKILL.md) for the workflow and reference
+A Codex skill for investigating Lean build latency, module elaboration and
+compiled native runtime. See [SKILL.md](SKILL.md) for the workflow and reference
 routing.
 
 ## Credits
