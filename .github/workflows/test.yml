@@ -24,3 +24,23 @@ jobs:
         run: python3 -m unittest discover -s tests -v
       - name: Check helper entrypoint
         run: python3 -B scripts/compare_commands.py --help
+      - name: Check report entrypoint and synthetic demo
+        run: |
+          python3 -B scripts/build_review.py --help
+          python3 -B scripts/build_review.py examples/review/report.json --out _out/review-demo
+
+  report-plots:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.10"
+      - name: Install optional plotting dependency
+        run: python3 -m pip install matplotlib
+      - name: Test reports with plots
+        env:
+          MPLBACKEND: Agg
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python3 -m unittest discover -s tests -p 'test_*review*.py' -v

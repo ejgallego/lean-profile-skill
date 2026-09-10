@@ -25,8 +25,9 @@ revisions, manifest hash, platform/CPU/core count, and artifact/OS-cache policy.
 Keep experiments isolated from the author's checkout.
 
 Choose a representative edit that invalidates the same source on each run.
-For document prose, alternating two same-length visible values is useful. Record the source hash and verify the expected text in
-finished HTML outside the timed interval. Check semantic output equivalence,
+For document prose, alternating two same-length visible values is useful. Record
+the source hash and verify the expected text in finished HTML outside the timed
+interval. Check semantic output equivalence,
 including warning hovers, CSS order and extracted code when relevant. Do not
 normalize away exactly the behavior a candidate changes. No-change samples
 must preserve source inputs; control real timestamp boundaries if clocks can
@@ -35,8 +36,9 @@ invalidate generated Lean files.
 Warm dependencies and the caches enabled in the workload. Do not silently
 enable a separate artifact-download cache for the experiment. Unless the user
 specifies another protocol, use at least one warmup and seven measured samples
-per configuration; nine is a useful default for accepted comparisons. Rotate candidate/control order, render into fresh numbered outputs,
-and retain actual execution order. Record wall/user/system time, peak RSS,
+per configuration; nine is a useful default for accepted comparisons. Rotate
+candidate/control order, render into fresh numbered outputs, and retain actual
+execution order. Record wall/user/system time, peak RSS,
 exit status, validation, and affected jobs. Report median, IQR with its chosen
 quantile convention, range, paired deltas and exclusions. Apply exclusions to
 matched pairs with a recorded reason; do not keep only the favorable member.
@@ -112,3 +114,7 @@ supply all build resource/job metrics or fresh-output/validation hooks.
 
 Keep project-specific edits, instrumentation and invalidation in local adapters
 rather than hard-coding a textbook or Blueprint workload into the shared skill.
+
+For reusable report generation and trace-quality conventions, read
+[profile-review.md](profile-review.md). Keep baseline, diagnostics, each paired
+experiment and historical observations distinct in the resulting report.

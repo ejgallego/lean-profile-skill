@@ -1,0 +1,91 @@
+{
+  "schema": "lean-profile-review-v1",
+  "title": "Synthetic performance report demo",
+  "summary": "All observations and trace events in this example are invented fixtures for testing the report tool. They are not Lean benchmark results. Each configuration has three small illustrative observations and one warmup.",
+  "baselines": [
+    {
+      "id": "original",
+      "title": "Original public-command baseline",
+      "boundary": "invocation to finished output",
+      "cohort": "edit",
+      "identity": "synthetic original capture A",
+      "command": "demo-build",
+      "note": "Synthetic baseline; all resources are fixture values. No command was executed.",
+      "configuration": "original",
+      "samples": "baseline.csv"
+    }
+  ],
+  "comparisons": [
+    {
+      "id": "cache",
+      "title": "Cached preparation",
+      "boundary": "invocation to finished output",
+      "cohort": "edit",
+      "identity": "synthetic matched capture B",
+      "command": "demo-build",
+      "decision": "Demonstration only",
+      "note": "Invented data; small samples do not establish an optimization.",
+      "control": "control",
+      "candidate": "candidate",
+      "samples": "comparison.csv"
+    },
+    {
+      "id": "combined",
+      "title": "Original versus combined configuration",
+      "boundary": "invocation to finished output",
+      "cohort": "edit",
+      "identity": "synthetic matched capture C",
+      "command": "demo-build",
+      "decision": "Demonstration only",
+      "note": "Invented data; small samples do not establish an optimization.",
+      "control": "original",
+      "candidate": "combined",
+      "samples": "total.csv"
+    }
+  ],
+  "progress": {
+    "note": "The selected layer and directly measured combination refer to different synthetic experiments. Historical endpoints are deliberately unpaired; no full-stack gain is assembled from the incremental changes.",
+    "selected": [
+      "cache"
+    ],
+    "totals": [
+      "combined"
+    ],
+    "historical": [
+      {
+        "title": "Earlier baseline versus later candidate",
+        "note": "Separate invented campaigns; this demonstrates provenance and unpaired presentation.",
+        "from": {
+          "baseline": "original"
+        },
+        "to": {
+          "comparison": "cache",
+          "side": "candidate"
+        }
+      }
+    ]
+  },
+  "attribution": [
+    {
+      "title": "Illustrative process boundaries",
+      "text": "The trace below is synthetic: setup, chapter work and output are chronological child scopes of one public-command scope. Real investigations must measure these boundaries and preserve parallel jobs."
+    }
+  ],
+  "profiles": [
+    {
+      "id": "timeline",
+      "title": "Synthetic chronological trace",
+      "kind": "perfetto",
+      "path": "trace.json",
+      "identity": "invented example; no process sampled",
+      "boundary": "microseconds from synthetic invocation",
+      "note": "This demonstrates browser import only. It makes no claim about Lean or any repository."
+    }
+  ],
+  "links": [
+    {
+      "title": "Example inputs",
+      "path": "report.json"
+    }
+  ]
+}

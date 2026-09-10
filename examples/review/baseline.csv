@@ -1,0 +1,5 @@
+configuration,pair,wall_s,exit_status,phase,validated,accepted,exclude_reason,user_s,system_s,peak_rss_kib
+original,warmup,40,0,warmup,true,true,,20,0.2,1024
+original,1,20,0,measured,true,true,,10.0,0.2,1024
+original,2,22,0,measured,true,true,,11.0,0.2,1024
+original,3,21,0,measured,true,true,,10.5,0.2,1024

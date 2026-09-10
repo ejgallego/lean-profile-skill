@@ -1,0 +1,9 @@
+configuration,pair,wall_s,exit_status,phase,validated,accepted,exclude_reason,user_s,system_s,peak_rss_kib
+control,warmup,40,0,warmup,true,true,,20,0.2,1024
+control,1,10,0,measured,true,true,,5.0,0.2,1024
+control,2,12,0,measured,true,true,,6.0,0.2,1024
+control,3,11,0,measured,true,true,,5.5,0.2,1024
+candidate,warmup,40,0,warmup,true,true,,20,0.2,1024
+candidate,1,8,0,measured,true,true,,4.0,0.2,1024
+candidate,2,9,0,measured,true,true,,4.5,0.2,1024
+candidate,3,10,0,measured,true,true,,5.0,0.2,1024

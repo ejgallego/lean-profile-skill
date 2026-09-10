@@ -1,0 +1,50 @@
+{
+  "traceEvents": [
+    {
+      "ph": "M",
+      "pid": 1,
+      "tid": 1,
+      "name": "thread_name",
+      "args": {
+        "name": "Synthetic public command"
+      }
+    },
+    {
+      "ph": "X",
+      "pid": 1,
+      "tid": 1,
+      "name": "Synthetic command",
+      "ts": 0,
+      "dur": 10000
+    },
+    {
+      "ph": "X",
+      "pid": 1,
+      "tid": 1,
+      "name": "Setup",
+      "ts": 0,
+      "dur": 2000
+    },
+    {
+      "ph": "X",
+      "pid": 1,
+      "tid": 1,
+      "name": "Chapter work",
+      "ts": 2000,
+      "dur": 5000
+    },
+    {
+      "ph": "X",
+      "pid": 1,
+      "tid": 1,
+      "name": "Output",
+      "ts": 7000,
+      "dur": 3000
+    }
+  ],
+  "displayTimeUnit": "ms",
+  "metadata": {
+    "synthetic": true,
+    "clock_origin": "invented invocation; ts and dur in microseconds"
+  }
+}

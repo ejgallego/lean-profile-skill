@@ -82,11 +82,11 @@ search anchors, not a stable instrumentation API):
 | Final `Command.elabCommand` of the public definition | Defining the final document constant |
 | Lean compiler/artifact phases | Transformations, C emission, serialization; separate from later C-object jobs |
 
-In the inspected SFL investigation, most finalization cost belonged to deferred
-blocks, while the last public definition was comparatively cheap. That is a
-methodological example, not a default conclusion for a new project. Use nested
-monotonic markers to resolve the actual enclosing scope; never sum inclusive
-parent and child times or mistake `interpretation` for pure bytecode overhead.
+A finalization scope can include deferred blocks as well as the final public
+definition. Measure these children before attributing the enclosing cost to
+constant construction. Use nested monotonic markers to resolve the actual scope;
+never sum inclusive parent and child times or mistake `interpretation` for pure
+bytecode overhead.
 
 Precompiling SubVerso or metaprogramming libraries can improve work executed
 during elaboration. Check total module/public wall time, clean-build cost and
@@ -107,12 +107,13 @@ implementation's passes rather than assuming a fixed number of traversals.
 Sample an already-built native generator only once its public-wall contribution
 justifies native attribution; cover its child and worker threads.
 
-Inspect existing encodings before proposing another representation. For example,
-the inspected `Verso/Code/Highlighted.lean` implementation of `hlToExport` already
-serializes highlighting as a JSON string and `hlFromExport!` decodes it. Moving
+Inspect existing encodings before proposing another representation. Search
+anchors include `hlToExport` and `hlFromExport!` in
+`Verso/Code/Highlighted.lean`; inspect their implementations at the current pin
+to determine which data is already serialized and when decoding happens. Moving
 surrounding constructor trees into serialized data may lower elaboration while
-increasing runtime reconstruction. Verify the current pin and concrete caller;
-do not treat the highlighted data format as a stable external serialization API.
+increasing runtime reconstruction. Do not treat an internal highlighted-data
+format as a stable external serialization API.
 
 For externalized chapter data, model the extra exporter/materialization job and
 its artifact explicitly. This is an experimental architecture, not a standard
@@ -123,10 +124,9 @@ scope; shared-import edits may still recompile other components.
 
 ## Project wrappers can add another build
 
-SFL's inspected path illustrates a nested boundary: the generator extracts
-standalone Lean projects and runs Lake to check them, then renames the HTML
-output into its canonical location. That generated-project build is not a
-second elaboration of the Verso source in the root workspace. It has its own
+Some generators extract standalone Lean projects and run Lake to check them
+before publishing HTML at its canonical location. That generated-project build
+is not a second elaboration of the Verso source in the root workspace. It has its own
 sources, manifest, artifact cache and dependency graph. Not every Verso project
 extracts code, verifies it, or uses this publication order.
 
@@ -171,3 +171,6 @@ Keep raw captures and transformation provenance; instrumented
 profiles explain accepted uninstrumented public measurements rather than replace
 them. No-change and clean-build costs remain regression dimensions even when
 edit-to-view is the current priority.
+
+Use [profile-review.md](profile-review.md) for the shared report builder and
+trace-quality checks. Version-specific instrumentation stays in the project.
