@@ -93,6 +93,8 @@ The demo's invented three-sample distributions exercise presentation and
 validation; they are not performance evidence. Open `/_out/review-demo/` on the
 local server. Python tests run with `python3 -m unittest discover -s tests -v`;
 the plotting check skips unless Matplotlib is installed.
+Run `node --test tests/test_review_js.cjs` for deterministic handoff/failure tests
+using Node's built-in test runner and mocked windows/timers, without network access.
 
 ## Summarizing improvements
 
@@ -125,6 +127,11 @@ with a transferable ArrayBuffer to `https://ui.perfetto.dev`. Handle popup
 blocking, timeouts, fetch errors and closed windows. Do not create uploads or
 share links merely to show a local trace. If the API has changed, check the
 [official documentation](https://perfetto.dev/docs/visualization/deep-linking-to-perfetto-ui).
+
+Keep timeout and tab-closure guards active over the whole fetch/readiness/handoff
+operation, including response-body reads after PONG. Abort the fetch on failure
+and recheck the target window immediately before transfer. Settling the readiness
+Promise alone must not disable those guards or allow a late fetch to report success.
 
 Keep user-facing interpretation separate from technical validation: report the
 most important measurements and uncertainty, not a checklist of every browser

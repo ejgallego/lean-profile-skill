@@ -43,38 +43,50 @@ async function openPerfetto(button) {
   }
   button.disabled = true;
   toast("Opening Perfetto… Waiting for its UI to be ready.", 0);
+  const controller = new AbortController();
   let interval, timer, listener;
-  const ready = new Promise((resolve, reject) => {
+  let fail;
+  const failure = new Promise((_, reject) => {
+    fail = reject;
+  });
+  const ready = new Promise((resolve) => {
     listener = (e) => {
       if (e.source === win && e.origin === origin && e.data === "PONG")
         resolve();
     };
     window.addEventListener("message", listener);
+  });
+  // These guards cover the entire operation, including a body stalled after PONG.
+  try {
     interval = setInterval(() => {
       if (win.closed) {
-        reject(new Error("Perfetto tab was closed."));
+        fail(new Error("Perfetto tab was closed."));
         return;
       }
       win.postMessage("PING", origin);
     }, 150);
     timer = setTimeout(
       () =>
-        reject(
+        fail(
           new Error(
-            "Perfetto did not respond. Download the trace and use Open trace file in ui.perfetto.dev.",
+            "Opening the trace in Perfetto timed out. Download the trace and use Open trace file in ui.perfetto.dev.",
           ),
         ),
       45000,
     );
-  });
-  try {
-    const [buffer] = await Promise.all([
-      fetch(button.dataset.perfetto).then((r) => {
-        if (!r.ok) throw new Error(`Trace request failed (${r.status}).`);
-        return r.arrayBuffer();
-      }),
-      ready,
+    const [buffer] = await Promise.race([
+      Promise.all([
+        fetch(button.dataset.perfetto, { signal: controller.signal }).then(
+          (r) => {
+            if (!r.ok) throw new Error(`Trace request failed (${r.status}).`);
+            return r.arrayBuffer();
+          },
+        ),
+        ready,
+      ]),
+      failure,
     ]);
+    if (win.closed) throw new Error("Perfetto tab was closed.");
     win.postMessage(
       {
         perfetto: {
@@ -89,6 +101,7 @@ async function openPerfetto(button) {
     );
     toast("Trace sent to the Perfetto tab for local viewing.");
   } catch (err) {
+    controller.abort();
     toast(err.message, 14000);
   } finally {
     clearInterval(interval);

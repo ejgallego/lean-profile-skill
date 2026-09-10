@@ -14,6 +14,7 @@ data, not benchmark results:
 ```bash
 python3 scripts/build_review.py examples/review/report.json --out _out/review-demo
 python3 -m unittest discover -s tests -v
+node --test tests/test_review_js.cjs
 ```
 
 Serve the common ancestor of the report and its linked profiles over HTTP;
@@ -32,7 +33,9 @@ uses only the Python standard library (Python 3.10+).
 - `assets/`: local report HTML, CSS and browser controls.
 - `examples/review/`: small synthetic report inputs and trace.
 - `tests/`: existing command-harness tests and report tests, discovered together
-  by `python3 -m unittest discover -s tests -v`. CI also runs the optional plots.
+  by Python unittest, plus dependency-free Node tests for the browser handoff.
+  CI runs both and also checks optional plots. Node 18+ is needed only for the
+  JavaScript tests, not for building a report.
 
 Develop and review skill changes in this repository, then deploy reviewed
 commits to installed skill locations. An installed copy may lag behind this
