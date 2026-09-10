@@ -3,7 +3,7 @@
 Use this mode for edit-to-output, no-change, clean-build, Lake, or Lean frontend
 work. It shares evidence practices with native profiling, but native sampling
 is a later tool choice, not the starting assumption. Treat each repository as
-a fresh workload; another Verso project's bottlenecks are hypotheses only.
+a fresh workload; another project's bottlenecks are hypotheses only.
 
 For Verso projects, also read [verso-builds.md](verso-builds.md) for the
 document/generator stages, deferred blocks, highlighting and project wrappers.
@@ -11,35 +11,46 @@ document/generator stages, deferred blocks, highlighting and project wrappers.
 ## Establish the public boundary
 
 Start with the project's documented public command and its real endpoint.
-For a site, distinguish first usable output, all HTML published, public command
-exit (which may include generated-project verification), and browser paint.
-Record only endpoints actually observed. `lake env`, `lake exe`, a direct
-binary, and `lean --run` have different setup/build costs; diagnostic timings
-at those boundaries cannot replace a public-command comparison.
+For a library, that may be `lake build LibraryTarget` through completion of its
+requested artifacts. For an executable, distinguish building/linking the binary
+from a command that also runs it. Record only endpoints actually observed.
+`lake env`, `lake exe`, a direct binary, and `lean --run` have different setup
+and build costs; diagnostic timings at those boundaries cannot replace a public
+command comparison. Site-generation boundaries are covered in the Verso reference.
 
-Before measurement, identify authoring modules, document root, generator entry
-point, output location, Lean module-system status, `precompileModules`, embedded
-`include_str` inputs and Lake `needs`, and external tools/processes. Record
-repository/worktree identities and patches, toolchain, Verso and other dependency
-revisions, manifest hash, platform/CPU/core count, and artifact/OS-cache policy.
-Keep experiments isolated from the author's checkout.
+Before measurement, identify the edited source modules, requested Lake targets,
+dependency graph, expected artifacts, and executable entry points or external
+tools where applicable. Check Lean module-system status, `precompileModules`,
+and declared dependencies for non-Lean inputs (for example, `include_str` files
+and their Lake `needs`). Record repository/worktree identities and patches,
+toolchain and dependency revisions, manifest hash, platform/CPU/core count, and
+artifact/OS-cache policy. Keep experiments isolated from the author's checkout.
 
 Choose a representative edit that invalidates the same source on each run.
-For document prose, alternating two same-length visible values is useful. Record
-the source hash and verify the expected text in finished HTML outside the timed
-interval. Check semantic output equivalence,
-including warning hovers, CSS order and extracted code when relevant. Do not
-normalize away exactly the behavior a candidate changes. No-change samples
-must preserve source inputs; control real timestamp boundaries if clocks can
-invalidate generated Lean files.
+Keep the scope of invalidation comparable, whether editing a proof, definition
+or another source input. Record source hashes and affected jobs, then verify the
+expected artifacts or behavior with workload-specific checks outside the timed
+interval. For example, check required declarations for a library or expected
+results for an executable. Compare candidate/control semantics appropriate to
+the change; do not normalize away the behavior being tested. No-change samples
+must preserve source inputs. Account for generated-source timestamps or other
+clock-dependent inputs when present. Verso prose and HTML checks belong to its
+workload-specific protocol.
 
 Warm dependencies and the caches enabled in the workload. Do not silently
-enable a separate artifact-download cache for the experiment. Unless the user
-specifies another protocol, use at least one warmup and seven measured samples
-per configuration; nine is a useful default for accepted comparisons. Rotate
-candidate/control order, render into fresh numbered outputs, and retain actual
-execution order. Record wall/user/system time, peak RSS,
-exit status, validation, and affected jobs. Report median, IQR with its chosen
+enable a separate artifact-download cache for the experiment. For affordable
+runs, seven to nine measured samples per configuration after a warmup are a
+practical starting point. Choose the trial count according to run cost, observed
+noise, expected effect size and the strength of the acceptance claim; no fixed
+count establishes validity. Record the sampling plan and any stopping rule,
+and state the limits of small or noisy captures. Follow a user's explicit
+measurement protocol when one is given.
+
+Rotate candidate/control order and retain actual execution order. Use fresh
+numbered log directories and separate generated outputs where applicable, while
+retaining incremental build artifacts according to the declared cache policy.
+Record wall/user/system time, peak RSS, exit status, validation, and affected jobs.
+Report median, IQR with its chosen
 quantile convention, range, paired deltas and exclusions. Apply exclusions to
 matched pairs with a recorded reason; do not keep only the favorable member.
 
@@ -52,16 +63,17 @@ needed and describe the achievable boundary.
 
 1. Record exactly which Lake jobs rebuild and their durations; construct the
    dependency critical path. Parallel job CPU/durations are not serial wall time.
-2. Locate the generator child and separate Lake setup/planning/build work from
-   startup/imports, materialization, traversal, rendering, writes and shutdown.
+2. Separate Lake setup/planning from module jobs, C compilation, linking and
+   other subprocesses actually present. If the public command also executes a
+   built program, distinguish its startup, work and shutdown from the build.
 3. Profile affected Lean modules with the toolchain's supported `--profile`,
    `profiler` options or `trace.profiler`. Inspect imports, initialization,
    elaboration, interpretation, compiler transformations, linters and tactics.
    Read toolchain help/local code for exact flags instead of assuming versions.
 4. Add coarse monotonic markers around identified phases. Preserve a common
    clock origin and event scope. Attribute expensive enclosing elaborators with
-   finer markers only where useful; a final document command may execute many
-   deferred blocks before constructing its last public definition.
+   finer markers only where useful; an enclosing elaborator may aggregate work
+   from several declarations, tactics or deferred actions.
 5. Inspect subprocess creation when external helpers could account for the cost.
    Use native sampling only once native runtime is a material part of the public
    wall time. Then follow the native workflow in SKILL.md.
@@ -95,8 +107,8 @@ Workload-dependent lessons worth checking, not assuming:
   explicit Lake dependencies, refresh rules and missing/corrupt-data checks.
 - Before replacing a representation, inspect the concrete caller and existing
   serialization. A large final command does not prove its final constant is large.
-- Development modes that omit highlighting are feature tradeoffs. Distinguish
-  them from normal-output improvements even when Lean checking remains enabled.
+- Development modes that omit normal work are feature tradeoffs. State which
+  behavior or checks they retain when comparing them with the normal workflow.
 
 For a cached or externalized artifact, validate source edits, imported-dependency
 edits, exporter edits, deletion, corruption and failed compilation as applicable.

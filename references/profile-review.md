@@ -1,7 +1,7 @@
 # Reusable profile reviews
 
 Use this reference when presenting multiple experiments, temporal traces or
-flamegraphs. Keep the user's current question first (for example edit-to-HTML
+flamegraphs. Keep the user's current question first (for example build latency
 and the edited module's elaboration) while retaining the decision history.
 
 ## Evidence and trace conventions
@@ -11,6 +11,9 @@ identity, sample count and decision. Link exact commands, cache policy, raw
 logs, validation and rejected candidates. Cross-campaign medians are historical
 context, not a cumulative speedup curve. Do not promote small median changes
 without paired evidence and output validation. Label preview feature tradeoffs.
+Explain why the trial count supports the stated claim given measurement cost
+and noise. Sample count alone does not establish an experiment's validity;
+single observations cannot characterize run-to-run variability.
 
 Every profile needs its capture identity, instrumented status, clock origin,
 units and boundary. Distinguish these visual forms:
@@ -105,7 +108,8 @@ They are displayed separately as **unpaired**, with identities and cohorts.
 The builder requires matching command and boundary strings; this catches obvious
 mistakes but cannot establish equivalent workloads, hosts or cache states.
 Investigators must assess that comparability and explain remaining differences.
-Keep nested Lean/module/generator timing separate from full edit-to-HTML timing.
+Keep nested module or executable diagnostics separate from full public-command
+timing.
 
 ## Browser validation
 

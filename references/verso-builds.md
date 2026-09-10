@@ -53,6 +53,14 @@ terms or external-tool dominance from the use of Verso. Ordinary Verso manuals,
 textbooks and Blueprint projects can have different import closures and costs.
 Only use Blueprint-specific workflows for a project that actually uses them.
 
+For prose edits, alternating two same-length visible values can keep source
+invalidation comparable. Record the source hash and verify the expected value
+in finished HTML outside the timing interval. Compare semantic outputs relevant
+to the change, including warning hovers, CSS order and extracted code where
+present. Do not normalize away the behavior being tested. Render complete sites
+into fresh numbered output directories while retaining the incremental build
+artifacts specified by the cache policy.
+
 ## Stage 1: document elaboration is real Lean work
 
 A prose edit can rebuild a chapter's Lean artifact, aggregating document roots,

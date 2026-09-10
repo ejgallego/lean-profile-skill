@@ -1,8 +1,10 @@
 """AI-generated integration checks for portable reports and evidence boundaries."""
 
 import copy
+import csv
 import hashlib
 import importlib.util
+import io
 import json
 from pathlib import Path
 import shutil
@@ -180,21 +182,45 @@ class ReportExtensionsTests(unittest.TestCase):
                 review.build(self.manifest, self.out)
 
     def test_csv_copy_and_hash_share_one_snapshot(self):
-        original_load = review.load
         source = self.root / "inputs/comparison.csv"
         before = source.read_bytes()
+        original_parse = review_data.observations
+        original_read = Path.read_bytes
+        source_reads = []
 
-        def mutate_after_capture(path):
-            result = original_load(path)
-            source.write_bytes(b"changed after capture")
+        def counted_read(path):
+            if path == source:
+                source_reads.append(path)
+            return original_read(path)
+
+        def mutate_after_parsing(snapshot, configurations, source_name="CSV"):
+            result = original_parse(snapshot, configurations, source_name)
+            if Path(source_name) == source:
+                # Change to another valid distribution after parsing, before
+                # hashing/statistics/archive. A later re-read must not win.
+                rows = list(csv.DictReader(io.StringIO(snapshot.decode())))
+                with source.open("w", newline="") as stream:
+                    writer = csv.DictWriter(stream, fieldnames=list(rows[0]))
+                    writer.writeheader()
+                    writer.writerows(row | {"wall_s": "100"} for row in rows)
             return result
 
-        with patch.object(review, "load", side_effect=mutate_after_capture):
+        with (
+            patch.object(Path, "read_bytes", counted_read),
+            patch.object(review_data, "observations", side_effect=mutate_after_parsing),
+        ):
             review.build(self.manifest, self.out)
+        self.assertEqual(source_reads, [source])
         self.assertEqual((self.out / "samples-00.csv").read_bytes(), before)
         data = json.loads((self.out / "review-data.json").read_text())
+        record = data["comparisons"][0]
+        self.assertEqual(record["samples_sha256"], hashlib.sha256(before).hexdigest())
+        archived = review.summarize(self.out / "samples-00.csv", "control", "candidate")
+        for key in ("control", "candidate", "paired_saving_s"):
+            self.assertEqual(record["statistics"][key], archived[key])
+        self.assertEqual(record["statistics"]["control"]["median"], 11)
         self.assertEqual(
-            data["comparisons"][0]["samples_sha256"], hashlib.sha256(before).hexdigest()
+            review.summarize(source, "control", "candidate")["control"]["median"], 100
         )
 
     def test_profile_only_report_needs_no_comparison_filter(self):

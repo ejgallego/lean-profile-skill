@@ -67,8 +67,10 @@ Do not convert CPU seconds or peak RSS into wall-time phases.
   pair cannot be recovered, exclude both members explicitly with a reason.
 
 There must be at least one included observation per configuration. Single
-observations are permitted for diagnostics, but do not satisfy a seven-/nine-run
-measurement protocol. All counts and exclusions remain visible in the model.
+observations are permitted, but cannot characterize run-to-run variability.
+Choose trial counts according to run cost, noise and the claims being made;
+the format imposes no universal acceptance threshold. All counts and exclusions
+remain visible in the model.
 
 Statistics include `n`, median, `q1`, `q3`, IQR and range. Quartiles use linear
 interpolation at `(n - 1) × p`; a singleton has IQR zero. The paired saving is
