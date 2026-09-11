@@ -39,23 +39,20 @@ stdout/stderr/perf paths are relative to that directory, not the import director
 Source snapshots and validation evidence appear as report links. Captures and
 external evidence are not bundled or relocated; retain them at stable paths.
 
-An observation enters statistics only when all of these hold:
-
-- It is a measured, completed run with the expected exit status.
-- The retained identity check reports no capture drift.
-- No harness evidence error was recorded.
-- An explicit output-validation record for that run passed.
+The importer applies the shared
+[inclusion contract](review-format.md#observation-contract). In addition, it
+requires a retained identity check reporting no drift and no recorded harness
+evidence error. Only a passed, hash-bound check below sets `validated=true`.
 
 Missing/failed checks leave the outcome visible with exclusion reasons. Omitting
 `--validation` is useful for inventorying captures, but includes no runs in timing
 statistics. A successful exit or an identity match is not an output check.
 Missing identity evidence also prevents inclusion, even if output checks passed.
 
-Warmups never become measured observations. A fail-fast capture containing only
-a baseline warmup timeout can still render: the candidate has no observations
-and neither configuration has a measured median. Measured timeouts and unmatched
-included blocks withhold paired estimates as described in
-[review-format.md](review-format.md). The importer does not select surviving pairs.
+Partial fail-fast captures can still render, including a baseline warmup timeout
+with no candidate observations. The shared
+[timeout and pairing rules](review-format.md#missing-outcomes-timeouts-and-pairing)
+apply; the importer never selects surviving pairs or promotes warmups.
 
 The generated comparison has an explanatory decision but no `decision_status`.
 An investigator may subsequently classify the optimization; the importer does
@@ -90,6 +87,10 @@ nonempty `record` selector or description. Paths are relative to the validation
 document or absolute. Unknown/duplicate run IDs, missing or changed artifacts,
 and hash mismatches fail before output is created. Checks may cover a subset
 of runs; all others remain explicitly unvalidated.
+
+A shared evidence path is hashed and linked once per import; every check retains
+its own selector. Each supplied expected hash is still checked, so conflicting
+hashes fail. A later invocation rereads evidence rather than reusing old hashes.
 
 Use actual project checks and state what they establish. The importer verifies
 the document's binding and artifact bytes, but does not interpret arbitrary

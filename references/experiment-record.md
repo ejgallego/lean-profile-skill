@@ -4,6 +4,10 @@ Use this reference to record accepted, rejected, and inconclusive candidates.
 Keep the record compact enough to scan as a JSONL ledger or short Markdown
 note, while linking large raw artifacts rather than embedding them.
 
+This is an investigator's experiment ledger, not the report builder's observation
+JSONL or input manifest. Use [review-format.md](review-format.md) for those inputs;
+map a concluded ledger status to `decision_status`, not statistical `included`.
+
 ## Required Fields
 
 - `id`: stable short name

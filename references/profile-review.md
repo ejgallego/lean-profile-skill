@@ -66,20 +66,16 @@ using [review-format.md](review-format.md); do not flatten nested JSON data into
 CSV merely to feed the report. Keep instrumentation, timing boundaries and
 cohorts separate even when configuration names match.
 
-Statistical `included` is independent of the optional investigator
-`decision_status` (`accepted`, `rejected`, `inconclusive`). Valid observations
-from a rejected optimization remain useful evidence. Reports can filter decisions
-without discarding samples. Missing correctness checks leave outcomes visible
-but excluded; a zero exit status is not a correctness check.
+Keep statistical inclusion separate from the optimization decision: rejected
+experiments can have valid measurements, and a zero exit status is not a
+correctness check. Decision filters do not discard observations. Use the
+[observation contract](review-format.md#observation-contract) for exact fields
+and inclusion requirements.
 
-Warmups, measured timeouts, interruptions and errors retain their own outcomes.
-A warmup timeout is not a measured baseline. Configured timeout limits are
-shown separately from observed elapsed time, which may include termination
-overhead. Measured timeouts suppress paired and overall speedup estimates;
-completed-only distributions remain explicitly conditional on completion. Unequal
-included block sets also suppress paired estimates instead of silently selecting
-surviving pairs. No successful samples means no median, not a fabricated timeout
-duration. The builder performs no survival analysis or timeout-based ratio bound.
+Retain failed and unvalidated outcomes without inventing timing estimates.
+In particular, a warmup timeout is not a measured baseline. Follow the
+[timeout and pairing rules](review-format.md#missing-outcomes-timeouts-and-pairing)
+when interpreting missing estimates and completion-conditional distributions.
 
 Example invocation (resolve the actual skill path first):
 

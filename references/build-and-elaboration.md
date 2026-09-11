@@ -86,7 +86,7 @@ A public invocation-to-olean interval includes orchestration, imports, compiler
 work and serialization; do not label it pure elaboration. Parent scopes include
 children; workers and build jobs overlap. Separately summarized interval medians
 need not sum to median wall time. Label sums from separate diagnostic runs
-approximate, and keep instrumented evidence separate from accepted wall samples.
+approximate, and keep instrumented evidence separate from included wall samples.
 
 ## Test one mechanism at a time
 

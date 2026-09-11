@@ -203,6 +203,10 @@ of collapsing repetitions into an aggregate. Because `perf stat` can perturb
 runtime, treat elapsed values from the counter run as diagnostics rather than
 headline timings.
 
+To turn a retained capture into an evidence report, follow
+[command-import.md](command-import.md). The importer preserves failed outcomes
+and requires explicit correctness records before including timings in statistics.
+
 ## Phase Mapping
 
 Before changing source, map where time is spent across the user-visible

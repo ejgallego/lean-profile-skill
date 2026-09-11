@@ -79,7 +79,10 @@ in array order; use explicit IDs for cross-references.
 
 ## Observation contract
 
-CSV and JSONL share the following required fields:
+CSV and JSONL require `id`, `configuration`, `block`, `exit_status`, `phase`,
+`outcome`, `validated`, `included` and `exclude_reason`. Completed outcomes also
+require one duration: **either `wall_s` or `elapsed_ns`, not both**. This CSV
+example uses seconds:
 
 ```csv
 id,configuration,block,wall_s,exit_status,phase,outcome,validated,included,exclude_reason
@@ -127,6 +130,8 @@ CSV headers must be unique and rows must have the correct field count. Extra
 fields are retained. The obsolete observation field `accepted` is rejected;
 use `included`. JSONL is not converted through CSV: typed/nested fields and
 integer clock readings survive in the archive and model.
+JSONL parsing errors identify the source file and physical line, including blank
+lines; syntax errors also report the column.
 
 The general reader validates structure and consistency, not the truth of
 investigator records. Link correctness evidence and explain exclusions. The
@@ -196,6 +201,10 @@ mount paths for HTTP serving. Profiles and links are hashed but not copied;
 serve their common ancestor and keep them stable. Perfetto opens its online UI
 and receives the trace locally in the browser on user click, without uploading
 or creating a share link.
+
+Each artifact path is hashed once per build, even when used by both profiles and
+links. Exact duplicate links (same path and title) are omitted; distinct titles
+remain. Hashes are recomputed on subsequent builds, not cached across invocations.
 
 ## Generated output and reproducibility
 
