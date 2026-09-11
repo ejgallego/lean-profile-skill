@@ -10,3 +10,6 @@
 # Python caches
 __pycache__/
 *.py[cod]
+
+# Generated local reports and benchmark captures
+/_out/

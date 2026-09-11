@@ -1,149 +1,219 @@
 # Review input format
 
-The `lean-profile-review-v1` manifest is UTF-8 JSON. Required top-level strings
+The `lean-profile-review-alpha` manifest is UTF-8 JSON. Required top-level strings
 are `schema`, `title` and `summary`. Strings are plain text, escaped for HTML;
 no Markdown interpreter or remote assets are needed for the report itself.
-Duplicate JSON keys and nonfinite constants are rejected.
+Duplicate JSON keys and nonfinite numbers are rejected. This alpha format has
+no compatibility layer for earlier manifests.
 
-`baselines`, `comparisons`, `profiles`, `attribution` and `links` are optional
-arrays. `progress` is an optional object. A comparison-only manifest from the
-original v1 format remains valid. See `examples/review/report.json` for a small
-complete example; the numbers and trace in that directory are invented.
+`datasets`, `baselines`, `comparisons`, `profiles`, `attribution` and `links`
+are optional arrays; `progress` is an optional object. See
+`examples/review/report.json` for a complete synthetic example. For retained
+`compare_commands.py` output, use [command-import.md](command-import.md).
 
-## Measurements
+## Datasets and explicit contrasts
 
-Each baseline or comparison requires these nonempty strings:
+A dataset is one capture with a shared workload, timing boundary and cohort.
+Split public-command, nested diagnostic, edit/no-change/clean and instrumented
+measurements into separate datasets, even when their configuration names match.
 
-| Field | Meaning |
+| Dataset field | Meaning |
 | --- | --- |
-| `title` | Short description of the workload or experiment. |
-| `boundary` | Start and stop of the measured interval. |
-| `cohort` | Edit/no-change/clean, cache policy and relevant conditions. |
-| `identity` | Control/candidate commits, toolchains, host and capture identity, or a concise description with a linked full identity record. |
-| `command` | Exact command whose wall time was measured. |
-| `note` | Workload details, output validation and limitations. |
-| `samples` | Path to the CSV, relative to the original manifest or absolute. |
+| `id` | Required stable identifier. |
+| `title` | Short description of the capture. |
+| `configurations` | Nonempty array of unique configuration names. |
+| `samples` | CSV or JSONL path, relative to the input manifest or absolute. |
+| `format` | Optional `csv` or `jsonl`; otherwise inferred from the file extension. |
+| `boundary` | Actual start and stop of the measured interval, including any harness overhead. |
+| `cohort` | Workload, cache policy and relevant conditions. |
+| `identity` | Commits, toolchains, host and capture identity, or concise text with a linked full identity record. |
+| `command` | Exact command(s), displayed in an expandable section. |
+| `expected_exit_status` | Integer, default `0`; matching it is necessary but not sufficient for inclusion. |
 
-A baseline additionally requires `configuration`. A comparison requires distinct
-`control` and `candidate` configurations plus `decision` (investigator-supplied
-acceptance, rejection or uncertainty). One CSV contains exactly the declared
-configuration(s) and one workload/boundary. Split edit, no-change, clean and
-instrumented measurements into separate entries and files. Link raw logs and
-validation records through `links`; the builder cannot verify their conclusions.
+A baseline requires `title`, `note`, `dataset` and `configuration`.
+A comparison requires `title`, `note`, `dataset`, distinct `control` and
+`candidate` configurations, and an investigator-written `decision` explanation.
+Its optional `decision_status` is `accepted`, `rejected` or `inconclusive`;
+absence means unclassified. This status concerns the optimization, not whether
+the underlying observations belong in statistics.
 
-An optional `id` gives a stable anchor for each baseline, comparison or profile.
-It must start with an ASCII letter and contain only letters, digits, `_` or `-`.
-IDs must be globally unique. The UI reserves `baselines`, `progress`,
-`attribution`, `measurements`, `evidence`, `filter`, `count`, `toast`, and the
-`frame-` prefix. Without explicit IDs, entries get `base-00`, `cmp-00` or
-`profile-00` in array order; use explicit IDs for cross-references.
-
-### CSV contract
-
-```csv
-configuration,pair,wall_s,exit_status,phase,validated,accepted,exclude_reason
-control,1,15.0,0,measured,true,true,
-candidate,1,13.0,0,measured,true,true,
-```
-
-The eight columns above are required. Headers must be unique and rows must have
-the correct field count. Additional columns are retained in the copied CSV.
-Optional recognized resource columns are `user_s`, `system_s`, `peak_rss_kib`;
-if present they must contain finite nonnegative numbers for every included row.
-Do not convert CPU seconds or peak RSS into wall-time phases.
-
-- `pair` is a stable matched-pair ID, not CSV row order. A baseline uses this
-  field as a unique observation ID, without implying pairing to other baselines.
-- `phase` is `measured` or `warmup`. Warmups are copied but excluded from statistics.
-- `validated` and `accepted` must be literal `true` or `false`, including warmups.
-  Do not infer successful output validation from exit status alone. Adapters
-  must use the campaign's actual validation records and fail on missing evidence.
-- `accepted` describes inclusion in a valid distribution, not approval of an
-  optimization: a rejected experiment can still have valid measured rows.
-  Excluded measured rows require an explicit `exclude_reason`.
-- Included rows require exit status `0`, `validated=true`, finite positive
-  `wall_s`, and a nonblank, unique ID within each configuration.
-- Comparisons require the same set of included IDs on both sides. When a valid
-  pair cannot be recovered, exclude both members explicitly with a reason.
-
-There must be at least one included observation per configuration. Single
-observations are permitted, but cannot characterize run-to-run variability.
-Choose trial counts according to run cost, noise and the claims being made;
-the format imposes no universal acceptance threshold. All counts and exclusions
-remain visible in the model.
-
-Statistics include `n`, median, `q1`, `q3`, IQR and range. Quartiles use linear
-interpolation at `(n - 1) × p`; a singleton has IQR zero. The paired saving is
-`control - candidate` for each matching ID, with its own median, IQR and range.
-The median of paired savings may differ from the difference of group medians.
-Percent reduction is `100 × (1 - candidate_median / control_median)`, so a
-negative value means slower. These statistics do not establish significance.
-
-## Summary of improvements
+Baselines and comparisons reference a dataset; they cannot override its metadata.
+Each dataset is parsed, hashed and copied once, regardless of the number of
+references. Three or more configurations get an overview table. Only requested
+contrasts are computed; the builder does not infer an N-way experimental design.
 
 ```json
 {
-  "progress": {
-    "note": "Selected results; combined change has its own measured comparison.",
-    "selected": ["cache"],
-    "totals": ["combined"],
-    "historical": [{
-      "title": "Earlier baseline to later result",
-      "note": "Separate captures; conditions differ. Descriptive only.",
-      "from": {"baseline": "original"},
-      "to": {"comparison": "cache", "side": "candidate"}
-    }]
-  }
+  "schema": "lean-profile-review-alpha",
+  "title": "Retained experiment",
+  "summary": "Explicitly validated observations; see linked correctness records.",
+  "datasets": [{
+    "id": "capture",
+    "title": "Public invocation",
+    "configurations": ["control", "candidate"],
+    "samples": "observations.jsonl",
+    "boundary": "process invocation through exit, including harness bookkeeping",
+    "cohort": "same workload and warm-cache policy",
+    "identity": "record actual commits, toolchains and host here",
+    "command": "record exact control and candidate commands here"
+  }],
+  "baselines": [{
+    "id": "original", "title": "Original cost", "note": "Retained control observations.",
+    "dataset": "capture", "configuration": "control"
+  }],
+  "comparisons": [{
+    "id": "trial", "title": "Candidate", "note": "Describe checks and limitations.",
+    "dataset": "capture", "control": "control", "candidate": "candidate",
+    "decision_status": "rejected", "decision": "Valid measurements, but not worth landing."
+  }]
 }
 ```
 
-`note` is required. `selected` and `totals` reference actual comparison IDs,
-without duplicates within each list. A `totals` entry must be a directly measured
-comparison of the relevant original and combined configurations; the author is
-responsible for that identity. The builder never composes experimental savings.
+An optional `id` gives a stable anchor for each baseline, comparison or profile.
+Dataset IDs are mandatory. IDs must start with an ASCII letter and contain
+only letters, digits, `_` or `-`. They must be globally unique. The UI reserves
+`baselines`, `datasets`, `progress`, `attribution`, `measurements`, `evidence`,
+`filter`, `decision-filter`, `count`, `toast`, and the `frame-` prefix.
+Default baseline/comparison/profile IDs are `base-00`, `cmp-00` or `profile-00`
+in array order; use explicit IDs for cross-references.
 
-Historical entries require `title`, `note`, `from` and `to`. Each endpoint is
-either `{"baseline": "id"}` or `{"comparison": "id", "side": "control"}`
-(also allowing side `candidate`). They must name the same command and timing
-boundary. Their distributions, identities, cohorts and hashes are retained;
-they get no synthesized paired observations or confidence claims.
+## Observation contract
+
+CSV and JSONL share the following required fields:
+
+```csv
+id,configuration,block,wall_s,exit_status,phase,outcome,validated,included,exclude_reason
+control-1,control,1,0.0045,0,measured,completed,true,true,
+candidate-1,candidate,1,0.0041,0,measured,completed,true,true,
+```
+
+The same flat observations can be expressed as JSONL, retaining integer clocks
+and any extra nested fields:
+
+```jsonl
+{"id":"control-1","configuration":"control","block":"1","elapsed_ns":4500000,"exit_status":0,"phase":"measured","outcome":"completed","validated":true,"included":true,"exclude_reason":"","argv":["tool","arg with spaces"]}
+{"id":"candidate-1","configuration":"candidate","block":"1","elapsed_ns":4100000,"exit_status":0,"phase":"measured","outcome":"completed","validated":true,"included":true,"exclude_reason":"","argv":["tool-candidate","arg with spaces"]}
+```
+
+- `id` is nonblank text, unique within the dataset.
+- `configuration` names a declared configuration.
+- `block` is nonblank text identifying a matched execution block, not row order.
+  Each configuration has at most one observation per phase/block.
+- Optional integer `slot` records execution order within a phase/block; it must
+  be positive and unique there. File order and nested fields are preserved.
+- `phase` is `measured` or `warmup`.
+- `outcome` is `completed`, `timeout`, `interrupted` or `error`.
+- `exit_status` is an integer or absent value (CSV empty, JSON null).
+  Completed outcomes require an integer.
+- Provide exactly one duration for a completed outcome: finite nonnegative
+  `wall_s`, or nonnegative integer `elapsed_ns`. Other outcomes may omit duration.
+  The model preserves the integer clock and derives seconds for statistics;
+  display rounding does not rewrite the source.
+- Timeouts require a finite positive `timeout_s`: the configured limit, not
+  observed elapsed time after termination handling.
+- `validated` and `included` are literal `true`/`false` in CSV and booleans in
+  JSONL. `validated` records an explicit correctness check, not exit status.
+- `included=true` requires a measured, completed, validated observation with
+  expected exit status, positive duration and an empty `exclude_reason`.
+  A rejected optimization can still have included observations.
+- `included=false` retains the outcome. Excluded measured observations require
+  a nonblank `exclude_reason`; warmups never enter statistics.
+- Optional row `boundary` and `cohort` must agree with the dataset when present.
+- Optional resources `user_s`, `system_s`, `peak_rss_kib` must be finite and
+  nonnegative. Each reported resource must cover all included observations in
+  that configuration, not a smaller subset.
+
+CSV headers must be unique and rows must have the correct field count. Extra
+fields are retained. The obsolete observation field `accepted` is rejected;
+use `included`. JSONL is not converted through CSV: typed/nested fields and
+integer clock readings survive in the archive and model.
+
+The general reader validates structure and consistency, not the truth of
+investigator records. Link correctness evidence and explain exclusions. The
+command importer additionally requires hash-bound validation records before
+marking outcomes output-validated.
+
+### Missing outcomes, timeouts and pairing
+
+Datasets must contain at least one observation, but a declared configuration
+can have none (for example, a fail-fast capture stopped before running it).
+Warmups and unsuccessful/unvalidated outcomes are visible without supplying
+a timing median. Missing statistics are null in the model and shown as dashes.
+
+For an explicit contrast, included block sets must match on both sides. Unequal
+sets produce an unavailable estimate with unmatched block IDs in the model;
+the builder never silently selects only complete pairs. If excluding unmatched
+members is justified, record that decision and the exclusions explicitly.
+
+A measured timeout on either selected configuration suppresses paired and
+overall speedup estimates, even if that timeout is marked excluded. Included
+completion distributions remain available but are conditional on completion.
+A warmup timeout is not a measured timeout or baseline. A timeout in an unrelated
+third configuration does not invalidate a fully matched contrast. No timeout is
+inserted into a distribution at its configured limit, and the builder does not
+perform survival analysis or infer speedup bounds.
+
+Statistics include `n`, median, `q1`, `q3`, IQR and range. Quartiles use linear
+interpolation at `(n - 1) × p`; a singleton has IQR zero but cannot characterize
+run-to-run variability. Choose trial counts for cost, noise, effect and claim;
+there is no universal minimum.
+
+Paired saving is `control - candidate` for each included matching block, with
+its own median, IQR and range. Its median may differ from the difference of
+group medians. Percent reduction is `100 × (1 - candidate_median / control_median)`;
+negative means slower. These descriptive statistics do not establish significance.
+Tables and axes choose common s/ms/µs/ns units and significant digits.
+
+## Summary of improvements
+
+`progress` requires a `note`; optional `selected` and `totals` arrays reference
+comparison IDs without duplicates within each array. A total must be a directly
+measured comparison of original and combined configurations; the investigator
+is responsible for that identity. The builder never composes incremental savings.
+
+Optional `historical` entries require `title`, `note`, `from` and `to`.
+Each endpoint is either `{"baseline": "id"}` or
+`{"comparison": "id", "side": "control"}` (also allowing `candidate`).
+Endpoints must name the same command and timing boundary. They remain separately
+labeled unpaired, with identities and cohorts, not synthesized pairs or confidence
+claims. Missing completions or measured censoring suppress their ratio.
 
 ## Attribution and evidence
 
-`attribution` entries require `title` and `text`. Use this for investigator-written
-phase explanation and explicitly label approximate sums from separate runs.
+`attribution` entries require `title` and `text`. Use investigator-written
+phase explanations and label approximate sums from separate runs.
 
-`profiles` entries require `title`, `kind`, `path`, `boundary`, `identity` and
-`note`. Supported kinds are `perfetto`, `viewer` (existing interactive HTML),
-`image` and `raw`. Optional `comparison` references a comparison ID, placing the
-profile beside that experiment; otherwise it appears with phase attribution.
-Include instrumented status, clock origin, units and capture provenance in the
-text. Local HTML viewers must be trusted artifacts; they execute when opened.
+`profiles` require `title`, `kind`, `path`, `boundary`, `identity` and `note`.
+Supported kinds remain `perfetto`, `viewer` (trusted interactive HTML), `image`
+and `raw`. Optional `comparison` references a comparison ID; otherwise the
+profile appears with phase attribution. Record instrumentation, clock origin,
+units and provenance. A native self profile is not a trustworthy caller tree;
+no conversion or new viewer semantics are inferred from an attachment.
 
-`links` entries require `title` and `path`. All artifact paths must be existing
-local files. Relative paths resolve from the original manifest directory and
-retain symlink mount paths for HTTP serving. Profiles and links are not copied;
-serve the common ancestor of their paths and the generated report. Perfetto
-opens its online UI, then receives a trace locally in the browser on user click.
+`links` require `title` and `path`. Artifact paths must be existing local files.
+Relative paths resolve from the input manifest directory and preserve symlink
+mount paths for HTTP serving. Profiles and links are hashed but not copied;
+serve their common ancestor and keep them stable. Perfetto opens its online UI
+and receives the trace locally in the browser on user click, without uploading
+or creating a share link.
 
 ## Generated output and reproducibility
 
-The builder creates a fresh directory containing `index.html`, local CSS/JS,
-`source-manifest.json`, `baseline-NN.csv`, `samples-NN.csv` and `review-data.json`.
-CSV snapshots are the exact bytes used for parsing, statistics and SHA-256
-hashing. The copied manifest preserves its original bytes; its paths still refer
-to its original location. `review-data.json` is a derived evidence model, not a
-replacement input manifest.
+A fresh output directory contains `index.html`, local CSS/JS,
+`source-manifest.json`, `dataset-NN.csv` or `dataset-NN.jsonl`, and
+`review-data.json`. Dataset snapshots are the exact bytes used for parsing,
+statistics and SHA-256 hashing, shared by every referring baseline/contrast.
+The manifest preserves its original bytes and original path semantics.
+`review-data.json` is a derived model, not a replacement input manifest.
 
-The model retains measurement metadata, source hashes, copied CSV filenames,
-included observation IDs/values, excluded row locations/reasons, and per-resource
-distributions. Comparisons also retain matching IDs and wall-time differences.
-Profile entries retain source paths and capture-time SHA-256 hashes; the linked
-files can change later. General evidence links have paths but no content hashes.
+The model retains metadata, source hashes, copied dataset names, included IDs,
+block IDs, all outcome records and resources. Contrasts retain matched block IDs,
+differences and unavailability reasons. Linked profiles/evidence retain their
+paths and build-time hashes but can change later.
 
-With `--plots`, Matplotlib produces `figures/*.svg` and `*.png`; the model records
-each figure's hash, source IDs and descriptive-statistics status. Plot bytes can
-vary with library versions, metadata and fonts; numerical reproducibility comes
-from the CSV snapshots and model. No benchmark runs or trace conversions happen
-during report generation. Keep campaign adapters, version-specific trace
-converters and project measurements outside the reusable package.
+With `--plots`, Matplotlib produces `figures/*.svg` and `*.png`; the model
+records their hashes and source IDs. Figure bytes depend on library versions,
+metadata and fonts; numerical reproducibility comes from snapshots and the model.
+No benchmarks or trace conversions run during reporting. Validation precedes
+output creation, but a later disk or plotting failure can leave a partial fresh
+directory. This is not a portable capture bundler.

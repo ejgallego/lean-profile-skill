@@ -1,46 +1,63 @@
 {
-  "schema": "lean-profile-review-v1",
+  "schema": "lean-profile-review-alpha",
   "title": "Synthetic performance report demo",
-  "summary": "All observations and trace events in this example are invented fixtures for testing the report tool. They are not Lean benchmark results. Each configuration has three small illustrative observations and one warmup.",
+  "summary": "All observations and trace events are invented fixtures, not Lean benchmark results. The examples cover paired samples, separately labeled history, multi-configuration JSONL, and a warmup-only timeout that is not a measured baseline.",
   "baselines": [
     {
       "id": "original",
       "title": "Original public-command baseline",
-      "boundary": "invocation to finished output",
-      "cohort": "edit",
-      "identity": "synthetic original capture A",
-      "command": "demo-build",
       "note": "Synthetic baseline; all resources are fixture values. No command was executed.",
       "configuration": "original",
-      "samples": "baseline.csv"
+      "dataset": "capture-0"
+    },
+    {
+      "id": "stalled-warmup",
+      "title": "Warmup-only timeout",
+      "dataset": "native-data",
+      "configuration": "stalled",
+      "note": "The warmup timed out. There is no measured baseline and no baseline speedup."
     }
   ],
   "comparisons": [
     {
       "id": "cache",
       "title": "Cached preparation",
-      "boundary": "invocation to finished output",
-      "cohort": "edit",
-      "identity": "synthetic matched capture B",
-      "command": "demo-build",
       "decision": "Demonstration only",
       "note": "Invented data; small samples do not establish an optimization.",
       "control": "control",
       "candidate": "candidate",
-      "samples": "comparison.csv"
+      "dataset": "capture-1",
+      "decision_status": "inconclusive"
     },
     {
       "id": "combined",
       "title": "Original versus combined configuration",
-      "boundary": "invocation to finished output",
-      "cohort": "edit",
-      "identity": "synthetic matched capture C",
-      "command": "demo-build",
       "decision": "Demonstration only",
       "note": "Invented data; small samples do not establish an optimization.",
       "control": "original",
       "candidate": "combined",
-      "samples": "total.csv"
+      "dataset": "capture-2",
+      "decision_status": "inconclusive"
+    },
+    {
+      "id": "native-contrast",
+      "title": "Current versus reference",
+      "dataset": "native-data",
+      "control": "current",
+      "candidate": "reference",
+      "decision_status": "rejected",
+      "decision": "Illustrative rejected hypothesis; inclusion does not mean acceptance.",
+      "note": "These valid synthetic observations exercise millisecond medians and microsecond paired savings."
+    },
+    {
+      "id": "timeout-contrast",
+      "title": "Unavailable baseline comparison",
+      "dataset": "native-data",
+      "control": "stalled",
+      "candidate": "current",
+      "decision_status": "inconclusive",
+      "decision": "No measured baseline.",
+      "note": "The recorded timeout is a warmup, not a 60-second median."
     }
   ],
   "progress": {
@@ -86,6 +103,60 @@
     {
       "title": "Example inputs",
       "path": "report.json"
+    }
+  ],
+  "datasets": [
+    {
+      "id": "capture-0",
+      "title": "Original public-command baseline",
+      "configurations": [
+        "original"
+      ],
+      "boundary": "invocation to finished output",
+      "cohort": "edit",
+      "identity": "synthetic original capture A",
+      "command": "demo-build",
+      "samples": "baseline.csv"
+    },
+    {
+      "id": "capture-1",
+      "title": "Cached preparation",
+      "configurations": [
+        "control",
+        "candidate"
+      ],
+      "boundary": "invocation to finished output",
+      "cohort": "edit",
+      "identity": "synthetic matched capture B",
+      "command": "demo-build",
+      "samples": "comparison.csv"
+    },
+    {
+      "id": "capture-2",
+      "title": "Original versus combined configuration",
+      "configurations": [
+        "original",
+        "combined"
+      ],
+      "boundary": "invocation to finished output",
+      "cohort": "edit",
+      "identity": "synthetic matched capture C",
+      "command": "demo-build",
+      "samples": "total.csv"
+    },
+    {
+      "id": "native-data",
+      "title": "Three-way millisecond example",
+      "configurations": [
+        "stalled",
+        "current",
+        "reference"
+      ],
+      "samples": "three-way.jsonl",
+      "boundary": "public command through completion",
+      "cohort": "synthetic native workload",
+      "identity": "invented data with no execution",
+      "command": "demo-native --input fixture"
     }
   ]
 }

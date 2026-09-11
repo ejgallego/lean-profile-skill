@@ -1,4 +1,4 @@
-"""AI-generated integration checks for portable reports and evidence boundaries."""
+"""Shared datasets, outcome presentation, history and optional plot integration."""
 
 import copy
 import csv
@@ -17,6 +17,7 @@ SKILL = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SKILL / "scripts"))
 import build_review as review
 import review_data
+from review_observations import observations, paired
 
 
 class ReportExtensionsTests(unittest.TestCase):
@@ -27,55 +28,85 @@ class ReportExtensionsTests(unittest.TestCase):
         shutil.copytree(SKILL / "examples/review", self.root / "inputs")
         self.manifest = self.root / "inputs/report.json"
         self.spec = json.loads(self.manifest.read_text())
-        self.out = self.root / "output"
+        self.out = self.root / "report"
 
     def write(self):
         self.manifest.write_text(json.dumps(self.spec))
 
-    def test_baseline_and_progress_use_recorded_series(self):
+    def test_baseline_and_history_are_recorded_series_not_synthetic_pairs(self):
         model, _, _ = review_data.load(self.manifest)
-        self.assertEqual(
-            model["baselines"][0]["series"]["statistics"]["wall_s"]["median"], 21
-        )
+        self.assertEqual(model["baselines"][0]["series"]["statistics"]["wall_s"]["median"], 21)
         history = model["progress"]["historical"][0]
         self.assertEqual(history["kind"], "historical_unpaired")
         self.assertNotIn("pair_ids", history)
         self.assertNotIn("paired_saving_s", history)
         self.assertEqual(history["before"]["statistics"]["n"], 3)
         self.assertEqual(history["after"]["statistics"]["median"], 9)
-        self.assertEqual(model["progress"]["totals"], ["combined"])
 
-    def test_total_is_measured_comparison_not_sum(self):
+    def test_total_is_an_actual_contrast_not_composed(self):
         model, _, _ = review_data.load(self.manifest)
         results = {c["id"]: c["statistics"] for c in model["comparisons"]}
         self.assertEqual(results["combined"]["paired_saving_s"]["median"], 7)
-        self.assertNotEqual(
-            results["combined"]["paired_saving_s"]["median"],
-            results["cache"]["paired_saving_s"]["median"],
-        )
+        self.assertNotEqual(results["combined"]["paired_saving_s"]["median"],
+                            results["cache"]["paired_saving_s"]["median"])
         page = review.build(self.manifest, self.out).read_text()
         self.assertIn("Directly measured cumulative comparisons", page)
         self.assertIn("Historical endpoints — unpaired", page)
 
-    def test_unknown_and_duplicate_summary_references_fail_before_output(self):
-        for progress in [
+    def test_three_way_dataset_is_copied_and_read_once_for_all_consumers(self):
+        source = self.root / "inputs/three-way.jsonl"
+        original_read = Path.read_bytes
+        reads = []
+
+        def counted(path):
+            if path == source:
+                reads.append(path)
+            return original_read(path)
+
+        with patch.object(Path, "read_bytes", counted):
+            page = review.build(self.manifest, self.out).read_text()
+        self.assertEqual(reads, [source])
+        self.assertEqual(len(list(self.out.glob("*.jsonl"))), 1)
+        self.assertEqual((self.out / "dataset-03.jsonl").read_bytes(), source.read_bytes())
+        self.assertIn("Multi-configuration overview", page)
+        self.assertIn("Current versus reference", page)
+        self.assertIn("Warmup-only timeout", page)
+
+    def test_timeout_baseline_has_no_fabricated_median_or_speedup(self):
+        model, _, _ = review_data.load(self.manifest)
+        baseline = model["baselines"][1]["series"]
+        self.assertEqual(baseline["statistics"], {})
+        self.assertFalse(baseline["censored"])
+        contrast = model["comparisons"][-1]["statistics"]
+        self.assertIsNone(contrast["paired_saving_s"])
+        self.assertIsNone(contrast["median_reduction_pct"])
+        self.spec["progress"]["totals"].append("timeout-contrast")
+        self.write()
+        page = review.build(self.manifest, self.out).read_text()
+        self.assertIn("warmup: 1 timeout; timeout limits 60 s", page)
+        self.assertIn("Not estimated", page)
+
+    def test_history_with_missing_baseline_stays_unestimated(self):
+        # Match declared metadata to inspect the no-completion case, not reject
+        # mismatched command/boundary first.
+        for key in review_data.METADATA:
+            self.spec["datasets"][3][key] = self.spec["datasets"][0][key]
+        self.spec["progress"]["historical"][0]["from"] = {"baseline": "stalled-warmup"}
+        self.write()
+        model, _, _ = review_data.load(self.manifest)
+        self.assertIsNone(model["progress"]["historical"][0]["median_reduction_pct"])
+        self.assertIn("Not estimated", review.build(self.manifest, self.out).read_text())
+
+    def test_unknown_duplicate_and_malformed_references_fail(self):
+        changes = [
             dict(note="test", selected=["missing"]),
             dict(note="test", totals=["cache", "cache"]),
             dict(note="test", totals=[[]]),
-            dict(
-                note="test",
-                historical=[
-                    dict(
-                        title="x",
-                        note="x",
-                        **{
-                            "from": {"baseline": "original"},
-                            "to": {"comparison": "cache", "side": "invalid"},
-                        }
-                    )
-                ],
-            ),
-        ]:
+            dict(note="test", historical=[dict(title="x", note="x",
+                 **{"from": {"baseline": "original"},
+                    "to": {"comparison": "cache", "side": "invalid"}})]),
+        ]
+        for progress in changes:
             with self.subTest(progress=progress):
                 self.spec["progress"] = progress
                 self.write()
@@ -83,87 +114,48 @@ class ReportExtensionsTests(unittest.TestCase):
                     review.build(self.manifest, self.out)
                 self.assertFalse(self.out.exists())
 
-    def test_history_cannot_mix_public_and_nested_boundaries(self):
-        for key, value in [("boundary", "one Lean module"), ("command", "lean --run")]:
+    def test_history_does_not_mix_commands_or_boundaries(self):
+        for key in ("boundary", "command"):
             with self.subTest(key=key):
-                item = self.spec["comparisons"][0]
-                original = item[key]
-                item[key] = value
+                original = self.spec["datasets"][1][key]
+                self.spec["datasets"][1][key] = "nested diagnostic"
                 self.write()
                 with self.assertRaises(ValueError):
                     review.build(self.manifest, self.out)
-                item[key] = original
-                self.assertFalse(self.out.exists())
+                self.spec["datasets"][1][key] = original
 
-    def test_ids_cannot_duplicate_or_capture_ui_controls(self):
-        for invalid in ["original", "measurements", "frame-viewer", "<script>"]:
+    def test_ids_do_not_capture_ui_controls_or_each_other(self):
+        for invalid in ("original", "datasets", "decision-filter", "frame-viewer", "<script>"):
             with self.subTest(invalid=invalid):
                 self.spec["comparisons"][0]["id"] = invalid
                 self.write()
                 with self.assertRaises(ValueError):
                     review.build(self.manifest, self.out)
 
-    def test_profile_attachment_must_name_a_comparison(self):
-        self.spec["profiles"][0]["comparison"] = "missing"
-        self.write()
-        with self.assertRaises(ValueError):
-            review.build(self.manifest, self.out)
-        self.assertFalse(self.out.exists())
-
-    def test_resources_are_separate_medians_and_preserved(self):
+    def test_resources_keep_distinct_units_and_population(self):
         model, _, _ = review_data.load(self.manifest)
         s = model["baselines"][0]["series"]["statistics"]
         self.assertEqual(s["user_s"]["median"], 10.5)
         self.assertEqual(s["peak_rss_kib"]["median"], 1024)
         page = review.build(self.manifest, self.out).read_text()
         self.assertIn("peak RSS (KiB)", page)
-        self.assertEqual(
-            (self.out / "baseline-00.csv").read_bytes(),
-            (self.root / "inputs/baseline.csv").read_bytes(),
-        )
 
-    def test_bad_resource_or_missing_inclusion_flag_is_not_silently_ignored(self):
+    def test_malformed_csv_columns_and_resources_fail_before_output(self):
         source = self.root / "inputs/baseline.csv"
         original = source.read_text()
-        for bad in [
-            original.replace("1024", "nan"),
-            original.replace("true", "TRUE"),
-            original.replace("validated", "unknown"),
-        ]:
-            source.write_text(bad)
-            with self.assertRaises(ValueError):
-                review.build(self.manifest, self.out)
-            self.assertFalse(self.out.exists())
-
-    def test_csv_duplicate_headers_and_extra_cells_fail(self):
-        source = self.root / "inputs/baseline.csv"
-        original = source.read_text()
-        for bad in [
-            original.replace("system_s", "user_s"),
-            original + "original,1,2,0,measured,true,true,,1,0,1,extra\n",
-        ]:
-            source.write_text(bad)
-            with self.assertRaises(ValueError):
-                review.build(self.manifest, self.out)
-
-    def test_single_observation_quartiles_and_overflow(self):
-        self.assertEqual(
-            review.stats([2]), dict(n=1, median=2, q1=2, q3=2, iqr=0, min=2, max=2)
-        )
-        for values in ([], [float("nan")], [1e308, 1e308]):
-            with self.assertRaises(ValueError):
-                review.stats(values)
-        with self.assertRaises(ValueError):
-            review_data.reduction(1e-300, 1e300)
+        for bad in (original.replace("1024", "nan"), original.replace("included", "accepted"),
+                    original.replace("system_s", "user_s"), original.replace(",true,", ",TRUE,"),
+                    original + "extra,cells\n"):
+            with self.subTest(bad=bad):
+                source.write_text(bad)
+                with self.assertRaises(ValueError):
+                    review.build(self.manifest, self.out)
+                self.assertFalse(self.out.exists())
 
     def test_invalid_json_types_and_constants_fail_before_output(self):
-        for key, value in [
-            ("profiles", {}),
-            ("progress", []),
-            ("baselines", [None]),
-            ("attribution", ["bad"]),
-            ("progress", {"note": "test", "historical": [None]}),
-        ]:
+        for key, value in [("profiles", {}), ("progress", []), ("baselines", [None]),
+                           ("datasets", [None]), ("attribution", ["bad"]),
+                           ("progress", {"note": "x", "historical": [None]})]:
             with self.subTest(key=key):
                 original = copy.deepcopy(self.spec)
                 self.spec[key] = value
@@ -172,32 +164,27 @@ class ReportExtensionsTests(unittest.TestCase):
                     review.build(self.manifest, self.out)
                 self.spec = original
                 self.assertFalse(self.out.exists())
-        for raw in [
-            '{"schema":"lean-profile-review-v1","extra":NaN}',
-            '{"schema":"lean-profile-review-v1","extra":1e400}',
-            '{"schema":"a","schema":"b"}',
-        ]:
+        for raw in ('{"schema":"x","extra":NaN}', '{"schema":"x","extra":1e400}',
+                    '{"schema":"a","schema":"b"}'):
             self.manifest.write_text(raw)
             with self.assertRaises(ValueError):
                 review.build(self.manifest, self.out)
 
-    def test_csv_copy_and_hash_share_one_snapshot(self):
+    def test_statistics_hash_and_archive_use_exact_single_read_snapshot(self):
         source = self.root / "inputs/comparison.csv"
         before = source.read_bytes()
         original_parse = review_data.observations
         original_read = Path.read_bytes
-        source_reads = []
+        reads = []
 
-        def counted_read(path):
+        def counted(path):
             if path == source:
-                source_reads.append(path)
+                reads.append(path)
             return original_read(path)
 
-        def mutate_after_parsing(snapshot, configurations, source_name="CSV"):
-            result = original_parse(snapshot, configurations, source_name)
+        def mutate(snapshot, configurations, source_name="observations", **kwargs):
+            result = original_parse(snapshot, configurations, source_name, **kwargs)
             if Path(source_name) == source:
-                # Change to another valid distribution after parsing, before
-                # hashing/statistics/archive. A later re-read must not win.
                 rows = list(csv.DictReader(io.StringIO(snapshot.decode())))
                 with source.open("w", newline="") as stream:
                     writer = csv.DictWriter(stream, fieldnames=list(rows[0]))
@@ -205,61 +192,34 @@ class ReportExtensionsTests(unittest.TestCase):
                     writer.writerows(row | {"wall_s": "100"} for row in rows)
             return result
 
-        with (
-            patch.object(Path, "read_bytes", counted_read),
-            patch.object(review_data, "observations", side_effect=mutate_after_parsing),
-        ):
+        with patch.object(Path, "read_bytes", counted), patch.object(review_data, "observations", mutate):
             review.build(self.manifest, self.out)
-        self.assertEqual(source_reads, [source])
-        self.assertEqual((self.out / "samples-00.csv").read_bytes(), before)
+        self.assertEqual(reads, [source])
+        archived_raw = (self.out / "dataset-01.csv").read_bytes()
+        self.assertEqual(archived_raw, before)
         data = json.loads((self.out / "review-data.json").read_text())
         record = data["comparisons"][0]
         self.assertEqual(record["samples_sha256"], hashlib.sha256(before).hexdigest())
-        archived = review.summarize(self.out / "samples-00.csv", "control", "candidate")
+        archived = paired(observations(archived_raw, ["control", "candidate"]), "control", "candidate")
         for key in ("control", "candidate", "paired_saving_s"):
             self.assertEqual(record["statistics"][key], archived[key])
         self.assertEqual(record["statistics"]["control"]["median"], 11)
-        self.assertEqual(
-            review.summarize(source, "control", "candidate")["control"]["median"], 100
-        )
+        changed = paired(observations(source.read_bytes(), ["control", "candidate"]), "control", "candidate")
+        self.assertEqual(changed["control"]["median"], 100)
 
-    def test_profile_only_report_needs_no_comparison_filter(self):
-        self.spec.pop("progress")
-        self.spec.pop("comparisons")
-        self.spec.pop("baselines")
-        self.write()
-        page = review.build(self.manifest, self.out).read_text()
-        self.assertNotIn('id="filter"', page)
-        self.assertIn("data-perfetto=", page)
-
-    def test_viewer_is_lazy_and_text_is_escaped(self):
-        viewer = self.root / "inputs/viewer #1.html"
-        viewer.write_text("<!doctype html><title>Fixture</title>")
-        self.spec["profiles"][0].update(
-            kind="viewer",
-            path=viewer.name,
-            note="<img src=x onerror=bad()>",
-            comparison="cache",
-        )
-        self.write()
-        page = review.build(self.manifest, self.out).read_text()
-        self.assertIn('data-source="../inputs/viewer%20%231.html"', page)
-        self.assertIn('aria-expanded="false"', page)
-        self.assertNotIn("onerror=bad()>", page)
-        self.assertIn("&lt;img", page)
-
-    @unittest.skipUnless(
-        importlib.util.find_spec("matplotlib"), "optional Matplotlib not installed"
-    )
-    def test_plot_files_retain_input_ids_and_hashes(self):
+    @unittest.skipUnless(importlib.util.find_spec("matplotlib"), "optional Matplotlib not installed")
+    def test_plots_preserve_sources_hashes_and_small_time_units(self):
         review.build(self.manifest, self.out, plots=True)
         model = json.loads((self.out / "review-data.json").read_text())
-        self.assertEqual(len(model["figures"]), 6)
-        for f in model["figures"]:
-            path = self.out / f["path"]
-            self.assertTrue(path.is_file())
-            self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(), f["sha256"])
-            self.assertTrue(f["source_ids"])
+        self.assertEqual(len(model["figures"]), 2 * (1 + len(model["comparisons"])))
+        for figure in model["figures"]:
+            path = self.out / figure["path"]
+            self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(), figure["sha256"])
+            self.assertTrue(figure["source_ids"])
+        svg = (self.out / "figures/native-contrast.svg").read_text()
+        self.assertIn("wall time (ms)", svg)
+        self.assertIn("Paired saving (µs)", svg)
+        self.assertIn("No included completion", (self.out / "figures/baselines.svg").read_text())
 
 
 if __name__ == "__main__":

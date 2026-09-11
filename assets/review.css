@@ -63,6 +63,20 @@ code {
     monospace;
   overflow-wrap: anywhere;
 }
+pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+details.command {
+  margin: 12px 0;
+  font-size: 13px;
+}
+.outcomes {
+  font-size: 13px;
+}
+summary {
+  cursor: pointer;
+}
 .scroll {
   overflow: auto;
   margin: 18px 0;
@@ -130,7 +144,8 @@ figcaption {
   line-height: 2.2;
 }
 button,
-input {
+input,
+select {
   font: inherit;
   font-size: 13px;
   padding: 6px 9px;
@@ -233,6 +248,7 @@ html {
   button,
   iframe,
   input,
+  select,
   label,
   #count,
   #toast {

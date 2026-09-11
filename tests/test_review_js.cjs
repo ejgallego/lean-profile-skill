@@ -10,6 +10,39 @@ const source = fs.readFileSync(
   "utf8",
 );
 const origin = "https://ui.perfetto.dev";
+
+test("decision and case-insensitive text filters compose without changing evidence", () => {
+  const handlers = {};
+  const elements = Object.fromEntries(["filter", "decision-filter", "count"].map(id => [id, {
+    value: id === "decision-filter" ? "all" : "",
+    addEventListener: (event, fn) => { handlers[`${id}/${event}`] = fn; },
+  }]));
+  const cards = [
+    { textContent: "Cache experiment", dataset: { decision: "accepted" } },
+    { textContent: "Cache experiment; valid samples", dataset: { decision: "rejected" } },
+    { textContent: "Native experiment", dataset: { decision: "inconclusive" } },
+    { textContent: "Native experiment", dataset: { decision: "unclassified" } },
+  ];
+  vm.runInNewContext(source, { document: {
+    getElementById: id => elements[id],
+    querySelectorAll: selector => selector === ".comparison" ? cards : [],
+  }});
+  assert.equal(elements.count.textContent, "4 comparisons");
+  elements["decision-filter"].value = "rejected";
+  handlers["decision-filter/change"]();
+  assert.deepEqual(cards.map(c => c.hidden), [true, false, true, true]);
+  elements.filter.value = "NATIVE";
+  handlers["filter/input"]();
+  assert.equal(elements.count.textContent, "0 comparisons");
+  elements["decision-filter"].value = "unclassified";
+  handlers["decision-filter/change"]();
+  assert.deepEqual(cards.map(c => c.hidden), [true, true, true, false]);
+  elements.filter.value = "";
+  elements["decision-filter"].value = "all";
+  handlers["filter/input"]();
+  assert.equal(elements.count.textContent, "4 comparisons");
+});
+
 function deferred() {
   let resolve, reject;
   const promise = new Promise((yes, no) => {

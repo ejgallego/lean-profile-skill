@@ -12,9 +12,11 @@ import json
 import os
 from pathlib import Path
 import re
+from collections import Counter
 from urllib.parse import quote
 
-from review_data import load, stats, summarize  # shared validated statistics API
+from review_data import load
+from review_format import duration, number, time_unit
 
 ASSETS = Path(__file__).resolve().parent.parent / "assets"
 E = html.escape
@@ -37,13 +39,46 @@ def table(headers, rows):
     )
 
 
-def distribution(s):
+def distribution(s, scale=1):
+    if s is None:
+        return ["0", "—", "—", "—"]
     return [
         str(s["n"]),
-        f'{s["median"]:.3f}',
-        f'{s["iqr"]:.3f}',
-        f'{s["min"]:.3f}–{s["max"]:.3f}',
+        number(s["median"], scale),
+        number(s["iqr"], scale),
+        f'{number(s["min"], scale)}–{number(s["max"], scale)}',
     ]
+
+
+def outcome_summary(values):
+    if not values["outcomes"]:
+        return "No observations recorded."
+    parts = []
+    for phase in ("measured", "warmup"):
+        rows = [r for r in values["outcomes"] if r["phase"] == phase]
+        if not rows:
+            continue
+        counts = Counter(r["outcome"] for r in rows)
+        detail = ", ".join(f"{n} {kind}" for kind, n in sorted(counts.items()))
+        limits = sorted({r["timeout_s"] for r in rows if r["outcome"] == "timeout"})
+        if limits:
+            detail += "; timeout limits " + ", ".join(duration(v) for v in limits)
+        parts.append(f"{phase}: {detail}")
+    return ". ".join(parts) + "."
+
+
+def outcome_details(values):
+    rows = [[E(r["block"]), E(r["phase"]), E(r["outcome"]),
+             duration(r["wall_s"]), duration(r.get("timeout_s")),
+             "included" if r["included"] else E(r["exclude_reason"] or "warmup")]
+            for r in values["outcomes"]]
+    note = E(outcome_summary(values))
+    if values["censored"]:
+        note += " Completed-only distributions are conditional; no full-cohort median is estimated."
+    return (f'<p class="outcomes">{note}</p>'
+            + ("<details><summary>Recorded outcomes and inclusion</summary>"
+               + table(["Block", "Phase", "Outcome", "Observed elapsed", "Timeout limit", "Inclusion"], rows)
+               + "</details>" if rows else ""))
 
 
 def build(manifest_path, out, plots=False):
@@ -100,8 +135,8 @@ def build(manifest_path, out, plots=False):
 
     def metadata(item):
         return (
-            f'<p><code>{E(item["command"])}</code> · {E(item["cohort"])}</p>'
-            f'<p class="identity">{E(item["boundary"])} · {E(item["identity"])}</p>'
+            f'<p class="identity">{E(item["cohort"])} · {E(item["boundary"])} · {E(item["identity"])}</p>'
+            f'<details class="command"><summary>Exact command</summary><pre><code>{E(item["command"])}</code></pre></details>'
         )
 
     def resource_note(series_data):
@@ -111,7 +146,7 @@ def build(manifest_path, out, plots=False):
             "peak_rss_kib": "peak RSS (KiB)",
         }
         present = [
-            f'{labels[k]}: {s["median"]:.3f}'
+            f'{labels[k]}: {number(s["median"])}'
             for k, s in series_data["statistics"].items()
             if k in labels
         ]
@@ -125,17 +160,34 @@ def build(manifest_path, out, plots=False):
 
     baseline_html = []
     for item in model["baselines"]:
-        s = item["series"]["statistics"]["wall_s"]
+        s = item["series"]["statistics"].get("wall_s")
+        scale, unit = time_unit([s["max"]] if s else [])
         baseline_html.append(
             f'<article id="{item["id"]}"><h3>{E(item["title"])}</h3>'
             + metadata(item)
             + table(
-                ["Configuration", "n", "Median, s", "IQR, s", "Range, s"],
-                [[E(item["configuration"])] + distribution(s)],
+                ["Configuration", "Included n", f"Median, {unit}", f"IQR, {unit}", f"Range, {unit}"],
+                [[E(item["configuration"])] + distribution(s, scale)],
             )
+            + outcome_details(item["series"])
             + resource_note(item["series"])
             + paragraphs(item["note"])
-            + f'<p class="references"><a href="{item["copied_samples"]}">Raw baseline observations</a>; {len(item["excluded"])} warmup/excluded rows retained.</p></article>'
+            + f'<p class="references"><a href="{item["copied_samples"]}">Shared raw dataset</a>; {len(item["excluded"])} warmup/excluded rows retained.</p></article>'
+        )
+    dataset_html = []
+    for item in model["datasets"]:
+        if len(item["configurations"]) < 3:
+            continue
+        summaries = [item["series"][c]["statistics"].get("wall_s") for c in item["configurations"]]
+        scale, unit = time_unit([s["max"] for s in summaries if s])
+        rows = [[E(c)] + distribution(s, scale) + [E(outcome_summary(item["series"][c]))]
+                for c, s in zip(item["configurations"], summaries)]
+        dataset_html.append(
+            f'<article id="{item["id"]}"><h3>{E(item["title"])}</h3>' + metadata(item)
+            + table(["Configuration", "Included n", f"Median, {unit}", f"IQR, {unit}",
+                     f"Range, {unit}", "Recorded outcomes"], rows)
+            + '<p>Distributions use included completed observations only. Measured timeouts make them conditional on completion; they do not estimate the full cohort. Pairing and availability are checked separately for each requested contrast.</p>'
+            + f'<p><a href="{item["copied_samples"]}">Shared raw dataset</a></p></article>'
         )
     progress_html = []
     if "progress" in model:
@@ -150,16 +202,16 @@ def build(manifest_path, out, plots=False):
             for cid in progress[key]:
                 c = by_id[cid]
                 s = c["statistics"]
-                a = s["control"]["median"]
-                b = s["candidate"]["median"]
+                a = s["control"]["median"] if s["control"] else None
+                b = s["candidate"]["median"] if s["candidate"] else None
                 saving = s["paired_saving_s"]
                 rows.append(
                     [
-                        f'<a href="#{cid}">{E(c["title"])}</a><small>{E(c["command"])} · {E(c["cohort"])}</small>',
-                        f"{a:.3f} → {b:.3f}",
-                        f'{s["median_reduction_pct"]:+.1f}%',
-                        f'{saving["median"]:+.3f}',
-                        f'{s["candidate_faster"]}/{saving["n"]}',
+                        f'<a href="#{cid}">{E(c["title"])}</a><small>{E(c["cohort"])}</small>',
+                        f"{duration(a)} → {duration(b)}",
+                        f'{s["median_reduction_pct"]:+.3g}%' if saving else "Not estimated",
+                        duration(saving["median"]) if saving else E(s["unavailable_reason"]),
+                        f'{s["candidate_faster"]}/{saving["n"]}' if saving else "—",
                     ]
                 )
             if rows:
@@ -168,9 +220,9 @@ def build(manifest_path, out, plots=False):
                     + table(
                         [
                             "Comparison / workload",
-                            "Control → candidate<br>median wall, s",
+                            "Control → candidate<br>included-completion median",
                             "Median reduction",
-                            "Paired saving<br>median, s",
+                            "Paired saving<br>median / availability",
                             "Faster pairs",
                         ],
                         rows,
@@ -187,8 +239,8 @@ def build(manifest_path, out, plots=False):
                 rows.append(
                     [
                         E(h["title"]) + f'<small>{E(h["note"])}</small>',
-                        f'{a["statistics"]["median"]:.3f} → {b["statistics"]["median"]:.3f}',
-                        f'{h["median_reduction_pct"]:+.1f}%',
+                        f'{duration(a["statistics"]["median"] if a["statistics"] else None)} → {duration(b["statistics"]["median"] if b["statistics"] else None)}',
+                        f'{h["median_reduction_pct"]:+.3g}%' if h["median_reduction_pct"] is not None else "Not estimated: missing completions or measured censoring",
                         E(a["configuration"])
                         + " → "
                         + E(b["configuration"])
@@ -200,7 +252,7 @@ def build(manifest_path, out, plots=False):
                 + table(
                     [
                         "Observation",
-                        "Earlier → later<br>median wall, s",
+                        "Earlier → later<br>included-completion median",
                         "Historical median reduction",
                         "Source configurations and identities",
                     ],
@@ -211,29 +263,37 @@ def build(manifest_path, out, plots=False):
     for item in model["comparisons"]:
         s = item["statistics"]
         saving = s["paired_saving_s"]
+        scale, unit = time_unit([s[key]["max"] for key in ("control", "candidate") if s[key]])
         rows = [
-            [E(item[key])] + distribution(s[key]) for key in ("control", "candidate")
+            [E(item[key])] + distribution(s[key], scale) for key in ("control", "candidate")
         ]
         content = (
-            f'<article class="comparison" id="{item["id"]}"><h3>{E(item["title"])}</h3>'
+            f'<article class="comparison" data-decision="{item["decision_status"] or "unclassified"}" id="{item["id"]}"><h3>{E(item["title"])}</h3>'
             + metadata(item)
-            + table(["Configuration", "n", "Median, s", "IQR, s", "Range, s"], rows)
-            + f'<p>Paired saving (control − candidate): median <strong>{saving["median"]:+.3f}s</strong>, IQR {saving["iqr"]:.3f}s, range {saving["min"]:+.3f} to {saving["max"]:+.3f}s; candidate faster in {s["candidate_faster"]}/{saving["n"]} pairs.</p>'
+            + table(["Configuration", "Included n", f"Median, {unit}", f"IQR, {unit}", f"Range, {unit}"], rows)
         )
+        if saving:
+            delta_scale, delta_unit = time_unit([saving["min"], saving["max"]])
+            content += f'<p>Paired saving (control − candidate), {delta_unit}: median <strong>{number(saving["median"], delta_scale, True)}</strong>, IQR {number(saving["iqr"], delta_scale)}, range {number(saving["min"], delta_scale, True)} to {number(saving["max"], delta_scale, True)}; candidate faster in {s["candidate_faster"]}/{saving["n"]} pairs.</p>'
+        else:
+            content += f'<p class="outcomes">{E(s["unavailable_reason"])}</p>'
         for key in ("control", "candidate"):
+            content += f'<h4>{E(item[key])}: recorded outcomes</h4>' + outcome_details(s["series"][key])
             resources = resource_note(s["series"][key])
             if resources:
                 content += f'<p class="identity">{E(item[key])}</p>' + resources
-        content += f'<p><strong>{E(item["decision"])}</strong></p>' + paragraphs(
+        if item["decision_status"]:
+            content += f'<p>Investigator decision: <strong>{E(item["decision_status"])}</strong>.</p>'
+        content += paragraphs(item["decision"]) + paragraphs(
             item["note"]
         )
         if plots:
             content += figure(
                 f'figures/{item["id"]}.svg',
                 item["title"],
-                "All included observations; bars span the 25th–75th percentiles, black ticks mark medians, and thin lines span full ranges. Positive paired saving means faster. Descriptive spreads, not confidence intervals.",
+                "Included completed observations only; bars span the 25th–75th percentiles, black ticks mark medians, and thin lines span full ranges. Paired estimates are withheld for measured censoring or incomplete included blocks. Descriptive spreads, not confidence intervals.",
             )
-        content += f'<p class="references">{len(s["excluded"])} warmup/excluded rows retained. <a href="{item["copied_samples"]}">Raw samples</a></p>'
+        content += f'<p class="references">{len(s["excluded"])} warmup/excluded rows retained. <a href="{item["copied_samples"]}">Shared raw dataset</a></p>'
         content += "".join(
             profile(p) for p in model["profiles"] if p.get("comparison") == item["id"]
         )
@@ -262,11 +322,16 @@ def build(manifest_path, out, plots=False):
             )
         )
     section("baselines", "Baseline", "".join(baseline_html))
+    section("datasets", "Multi-configuration overview", "".join(dataset_html))
     section("progress", "Summary of improvements", "".join(progress_html))
     section("attribution", "Phase attribution and profiles", attribution_html)
     methods = (
         "<p>Compare each candidate with its own control, workload and timing boundary. IQR uses inclusive linear interpolation. A median of paired differences can differ from the difference of group medians. Decisions are supplied by the investigator; they are not inferred from positive savings.</p>"
-        '<label for="filter">Find an experiment</label> <input id="filter" type="search"><span id="count" aria-live="polite"></span>'
+        '<label for="filter">Find an experiment</label> <input id="filter" type="search"> '
+        '<label for="decision-filter">Decision</label> <select id="decision-filter">'
+        '<option value="all">All decisions</option><option value="accepted">Accepted</option>'
+        '<option value="rejected">Rejected</option><option value="inconclusive">Inconclusive</option>'
+        '<option value="unclassified">Unclassified</option></select><span id="count" aria-live="polite"></span>'
     )
     section(
         "measurements",
@@ -280,7 +345,7 @@ def build(manifest_path, out, plots=False):
         (f"<p>{links}</p>" if links else "")
         + '<p><a href="review-data.json">Statistics and provenance</a> · <a href="source-manifest.json">Original input manifest</a></p>'
     )
-    evidence += "<p>CSV snapshots are copied into this report. Profile files remain linked at their original locations; serve their common ancestor over HTTP. Perfetto opens its online UI and receives the selected trace locally in the browser. This builder runs no benchmarks and does not validate a trace’s internal structure.</p>"
+    evidence += "<p>Each CSV or JSONL dataset is snapshotted once for all its contrasts. Profile files remain linked at their original locations; serve their common ancestor over HTTP. Perfetto opens its online UI and receives the selected trace locally in the browser. This builder runs no benchmarks and does not validate a trace’s internal structure.</p>"
     section("evidence", "Evidence and reproduction", evidence)
     replacements = dict(
         TITLE=E(model["title"]),

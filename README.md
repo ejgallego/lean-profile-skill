@@ -5,8 +5,10 @@ compiled native runtime. See [SKILL.md](SKILL.md) for the workflow and reference
 routing.
 
 The skill includes a static evidence-report builder. It computes baseline and
-paired-comparison statistics from explicitly validated CSV samples, with optional
-Matplotlib figures and links to existing profiles. See
+paired-comparison statistics from explicitly included CSV or JSONL observations,
+with optional Matplotlib figures and links to existing profiles. Shared datasets
+support several configurations and explicit pairwise contrasts. Timeouts and
+unvalidated outcomes stay visible without becoming timing estimates. See
 [the report guide](references/profile-review.md) and
 [input format](references/review-format.md). The small example contains invented
 data, not benchmark results:
@@ -23,19 +25,28 @@ repository root and open `http://localhost:8767/_out/review-demo/`. Add `--plots
 with Matplotlib installed for SVG/PNG distributions. The default report builder
 uses only the Python standard library (Python 3.10+).
 
+For retained `compare_commands.py` captures, use the first-party
+[command importer](references/command-import.md). It preserves raw records and
+exact argv without rerunning commands. Output-validation evidence is explicit:
+exit status alone never makes an observation eligible for statistics.
+
+The report format is alpha and deliberately has no compatibility layer. See the
+current [input contract](references/review-format.md) when preparing a manifest.
+
 ## Repository layout
 
 - `SKILL.md` and `agents/openai.yaml`: workflow routing and skill metadata.
 - `references/`: public-build, elaboration, Verso and native-runtime guidance,
   plus the report guide and input contract.
-- `scripts/`: command comparison harness, validated report data model and builder,
-  and optional plots. The builder consumes evidence without running benchmarks.
+- `scripts/`: command comparison harness, retained-capture importer, shared
+  observation model, report builder, and optional plots. Importing and reporting
+  consume evidence without running benchmarks.
 - `assets/`: local report HTML, CSS and browser controls.
 - `examples/review/`: small synthetic report inputs and trace.
 - `tests/`: existing command-harness tests and report tests, discovered together
-  by Python unittest, plus dependency-free Node tests for the browser handoff.
-  CI runs both and also checks optional plots. Node 18+ is needed only for the
-  JavaScript tests, not for building a report.
+  by Python unittest, plus dependency-free Node tests for filters and the browser
+  handoff. CI runs both and also checks optional plots. Node 18+ is needed only
+  for the JavaScript tests, not for building a report.
 
 Develop and review skill changes in this repository, then deploy reviewed
 commits to installed skill locations. An installed copy may lag behind this

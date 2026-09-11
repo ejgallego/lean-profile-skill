@@ -50,13 +50,36 @@ Use baseline tables and distributions to establish the cost before discussing
 changes. For each experiment, explain the change and compare it with its own
 control. Attach existing profiles beside the relevant explanation.
 
-The builder computes statistics from raw CSV and copies the exact bytes used for
-those calculations. It writes `review-data.json` with source hashes, included
-observations, exclusions, resource statistics and the quartile convention.
-`scripts/review_data.py` supplies the same validated model to tables and plots.
+The builder computes statistics from raw CSV or JSONL datasets and copies each
+dataset once, using the exact bytes parsed and hashed. Several configurations
+can share one capture, with explicit control/candidate contrasts. It writes
+`review-data.json` with source hashes, included observations, all recorded
+outcomes, resource statistics and the quartile convention. Tables and plots
+use the same observation model.
 It refuses existing output directories and validates input before creating one;
 a later disk or plotting failure can leave a partial directory. It runs no
 benchmarks, parses no profiler internals, and invents no flamegraph.
+
+For retained `compare_commands.py` output, start with the
+[command importer](command-import.md). For another harness, prepare observations
+using [review-format.md](review-format.md); do not flatten nested JSON data into
+CSV merely to feed the report. Keep instrumentation, timing boundaries and
+cohorts separate even when configuration names match.
+
+Statistical `included` is independent of the optional investigator
+`decision_status` (`accepted`, `rejected`, `inconclusive`). Valid observations
+from a rejected optimization remain useful evidence. Reports can filter decisions
+without discarding samples. Missing correctness checks leave outcomes visible
+but excluded; a zero exit status is not a correctness check.
+
+Warmups, measured timeouts, interruptions and errors retain their own outcomes.
+A warmup timeout is not a measured baseline. Configured timeout limits are
+shown separately from observed elapsed time, which may include termination
+overhead. Measured timeouts suppress paired and overall speedup estimates;
+completed-only distributions remain explicitly conditional on completion. Unequal
+included block sets also suppress paired estimates instead of silently selecting
+surviving pairs. No successful samples means no median, not a fabricated timeout
+duration. The builder performs no survival analysis or timeout-based ratio bound.
 
 Example invocation (resolve the actual skill path first):
 
@@ -71,12 +94,15 @@ the common artifact ancestor so linked profiles are reachable; the report does
 not copy potentially huge captures. Keep their paths stable, including symlink
 mount paths. A copied `source-manifest.json` is provenance of the original input;
 its relative paths remain relative to the original manifest's directory. Linked
-profiles are hashed when building but remain mutable files outside the report.
-Archive their original captures when reproducibility requires immutable evidence.
+profiles and evidence links are hashed when building but remain mutable files
+outside the report. Archive their original captures when reproducibility requires
+immutable evidence.
 
 Add `--plots` with Matplotlib installed to produce standalone SVG and PNG figures.
 Plots show all included observations, medians, IQRs and ranges; paired differences
 get a separate axis. These are descriptive spreads, not confidence intervals.
+Tables and axes choose common s/ms/µs/ns units; displayed values use significant
+digits without changing the numerical model. Exact commands are expandable.
 The tool does not install dependencies. Use a project environment or, for example,
 `uv run --with matplotlib python scripts/build_review.py ... --plots`.
 
@@ -89,12 +115,14 @@ python3 scripts/build_review.py examples/review/report.json --out _out/review-de
 python3 -m http.server 8767 --bind 127.0.0.1 --directory .
 ```
 
-The demo's invented three-sample distributions exercise presentation and
-validation; they are not performance evidence. Open `/_out/review-demo/` on the
+The demo's invented three-sample distributions, three-configuration JSONL capture,
+warmup timeout and rejected experiment exercise presentation and validation;
+they are not performance evidence. Open `/_out/review-demo/` on the
 local server. Python tests run with `python3 -m unittest discover -s tests -v`;
 the plotting check skips unless Matplotlib is installed.
-Run `node --test tests/test_review_js.cjs` for deterministic handoff/failure tests
-using Node's built-in test runner and mocked windows/timers, without network access.
+Run `node --test tests/test_review_js.cjs` for deterministic filter and handoff
+failure tests using Node's built-in test runner and mocked windows/timers,
+without network access.
 
 ## Summarizing improvements
 

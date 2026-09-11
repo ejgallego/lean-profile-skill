@@ -67,6 +67,10 @@ dimensions explicitly before proposing a compiler feature or native override.
    - If no comparison harness exists, use the bundled
      `scripts/compare_commands.py` to preserve order-balanced raw runs and
      command identities.
+   - To report retained harness captures, read
+     [command-import.md](references/command-import.md). Importing does not validate
+     outputs; explicit checks determine statistical inclusion, independently of
+     the optimization decision.
 
 4. Collect attribution with native profilers.
    - Use `perf record`, flamegraphs, or `samply` to choose targets.

@@ -4,14 +4,18 @@ const $ = (id) => document.getElementById(id);
 function filter() {
   if (!$("filter")) return;
   const q = $("filter").value.toLowerCase();
+  const decision = $("decision-filter")?.value || "all";
   let count = 0;
   for (const card of document.querySelectorAll(".comparison")) {
-    card.hidden = !card.textContent.toLowerCase().includes(q);
+    card.hidden =
+      !card.textContent.toLowerCase().includes(q) ||
+      (decision !== "all" && card.dataset.decision !== decision);
     if (!card.hidden) count++;
   }
   $("count").textContent = `${count} comparisons`;
 }
 $("filter")?.addEventListener("input", filter);
+$("decision-filter")?.addEventListener("change", filter);
 filter();
 for (const button of document.querySelectorAll("[data-viewer]"))
   button.addEventListener("click", () => {
