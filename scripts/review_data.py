@@ -134,8 +134,18 @@ def load(manifest_path):
                 if status is not None and status not in ("accepted", "rejected", "inconclusive"):
                     raise ValueError("decision_status must be accepted, rejected or inconclusive")
                 entry["decision_status"] = status
+                if "group" in item:
+                    entry["group"] = text(item, "group")
                 entry["statistics"] = paired(dataset["series"], entry["control"], entry["candidate"])
             model[kind].append(entry)
+
+    groups = {}
+    for entry in model["comparisons"]:
+        if "group" in entry:
+            shared = tuple(entry[key] for key in ("note", "decision", "decision_status"))
+            prior = groups.setdefault(entry["group"], shared)
+            if prior != shared:
+                raise ValueError("Grouped comparisons must share note, decision and decision_status; datasets remain separate")
 
     comparison_ids = {c["id"] for c in model["comparisons"]}
     for index, item in enumerate(array(spec, "profiles")):

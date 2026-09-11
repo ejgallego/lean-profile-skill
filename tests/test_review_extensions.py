@@ -242,7 +242,7 @@ class ReportExtensionsTests(unittest.TestCase):
             self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(), figure["sha256"])
             self.assertTrue(figure["source_ids"])
         svg = (self.out / "figures/native-contrast.svg").read_text()
-        self.assertIn("wall time (ms)", svg)
+        self.assertIn("wall time (ms)", svg.lower())
         self.assertIn("Paired saving (µs)", svg)
         self.assertIn("No included completion", (self.out / "figures/baselines.svg").read_text())
 

@@ -90,7 +90,7 @@ def render(model, output):
                 range(len(model["baselines"])), [b["title"] for b in model["baselines"]]
             )
             ax.set_ylim(len(model["baselines"]) - 0.5, -0.5)
-            ax.set_xlabel(f"Included completed wall time at each declared boundary ({unit})")
+            ax.set_xlabel(f"Wall time ({unit})")
             ax.set_xlim(left=0)
             save(fig, "baselines", [b["id"] for b in model["baselines"]])
         for c in model["comparisons"]:
@@ -107,7 +107,7 @@ def render(model, output):
                 interval(left, values, y, color, scale)
             left.set_yticks([0, 1], [c["control"], c["candidate"]])
             left.set_ylim(1.5, -0.5)
-            left.set_xlabel(f"Included completed wall time ({unit})")
+            left.set_xlabel(f"Wall time ({unit})")
             left.set_xlim(left=0)
             if result["savings"]:
                 scale, unit = time_unit(result["savings"])

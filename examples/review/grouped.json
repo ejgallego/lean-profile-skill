@@ -1,0 +1,73 @@
+{
+  "schema": "lean-profile-review-alpha",
+  "title": "Synthetic grouped experiment",
+  "summary": "Two workload fixtures demonstrate compact baselines and grouped comparisons. These are invented values, not benchmark evidence.",
+  "datasets": [
+    {
+      "id": "small",
+      "title": "Small input",
+      "samples": "comparison.csv",
+      "configurations": [
+        "control",
+        "candidate"
+      ],
+      "boundary": "public invocation through finished output",
+      "cohort": "synthetic small workload",
+      "identity": "invented fixture; no process executed",
+      "command": "demo-build --input small"
+    },
+    {
+      "id": "large",
+      "title": "Large input",
+      "samples": "total.csv",
+      "configurations": [
+        "original",
+        "combined"
+      ],
+      "boundary": "public invocation through finished output",
+      "cohort": "synthetic large workload",
+      "identity": "invented fixture; no process executed",
+      "command": "demo-build --input large"
+    }
+  ],
+  "baselines": [
+    {
+      "id": "small-base",
+      "title": "Small input",
+      "note": "Synthetic baseline.",
+      "dataset": "small",
+      "configuration": "control"
+    },
+    {
+      "id": "large-base",
+      "title": "Large input",
+      "note": "Synthetic baseline.",
+      "dataset": "large",
+      "configuration": "original"
+    }
+  ],
+  "comparisons": [
+    {
+      "id": "small-comparison",
+      "group": "Cache input preparation",
+      "title": "Small input",
+      "note": "Illustrative experiment: cache immutable input preparation and measure two workloads separately. Values are invented fixtures; no command was executed.",
+      "decision": "Demonstration only; no performance conclusion.",
+      "decision_status": "inconclusive",
+      "dataset": "small",
+      "control": "control",
+      "candidate": "candidate"
+    },
+    {
+      "id": "large-comparison",
+      "group": "Cache input preparation",
+      "title": "Large input",
+      "note": "Illustrative experiment: cache immutable input preparation and measure two workloads separately. Values are invented fixtures; no command was executed.",
+      "decision": "Demonstration only; no performance conclusion.",
+      "decision_status": "inconclusive",
+      "dataset": "large",
+      "control": "original",
+      "candidate": "combined"
+    }
+  ]
+}

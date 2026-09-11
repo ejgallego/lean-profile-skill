@@ -50,6 +50,16 @@ Use baseline tables and distributions to establish the cost before discussing
 changes. For each experiment, explain the change and compare it with its own
 control. Attach existing profiles beside the relevant explanation.
 
+Keep the baseline table and its distribution together, followed by the improvement
+summary. Routine per-run outcomes, commands and resource statistics are expandable;
+missing estimates, timeout caveats and measured exclusions remain visible. Repeated
+capture identities belong with the evidence, where readers can check them without
+losing the comparison. For one experiment measured on several workloads, optional
+comparison `group` shows one explanation and a compact table; see the
+[grouping contract](review-format.md#datasets-and-explicit-contrasts). Keep the
+representative workload first so its plot appears with the experiment. Grouping
+must not pool measurements or blur timing boundaries.
+
 The builder computes statistics from raw CSV or JSONL datasets and copies each
 dataset once, using the exact bytes parsed and hashed. Several configurations
 can share one capture, with explicit control/candidate contrasts. It writes
@@ -121,6 +131,10 @@ failure tests using Node's built-in test runner and mocked windows/timers,
 without network access.
 
 ## Summarizing improvements
+
+`examples/review/grouped.json` is a small synthetic demonstration of one experiment
+across two workloads. Build it with the same command as `examples/review/report.json`;
+it reuses existing invented fixture CSVs and contains no campaign data.
 
 Select experiments explicitly by ID. The builder does not decide whether a
 candidate should be accepted. A cumulative result must reference an actual

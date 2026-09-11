@@ -18,6 +18,7 @@ body {
     sans-serif;
 }
 main {
+  overflow-wrap: anywhere;
   max-width: 1160px;
   margin: 32px auto 80px;
   padding: 0 30px;
@@ -55,6 +56,17 @@ nav {
 nav a {
   white-space: nowrap;
 }
+.experiment-index ol {
+  columns: 2 340px;
+  list-style: none;
+  padding-left: 0;
+}
+.experiment-index li {
+  break-inside: avoid;
+}
+.experiment-index a {
+  white-space: normal;
+}
 code {
   font:
     13px ui-monospace,
@@ -73,6 +85,16 @@ details.command {
 }
 .outcomes {
   font-size: 13px;
+}
+.measurement-details {
+  margin: 12px 0;
+  font-size: 13px;
+}
+.measurement-details > summary {
+  color: var(--link);
+}
+.availability {
+  color: #68360e;
 }
 summary {
   cursor: pointer;
@@ -135,6 +157,16 @@ figcaption {
   padding-top: 5px;
   margin-top: 30px;
   border-top: 1px solid #ccc;
+}
+.comparison-group {
+  margin-top: 34px;
+  border-top: 1px solid var(--line);
+}
+.comparison-row {
+  scroll-margin-top: 18px;
+}
+.comparison-group td:first-child {
+  min-width: 160px;
 }
 .profile {
   margin-top: 25px;
@@ -271,6 +303,12 @@ html {
     color: #222;
   }
   .comparison[hidden] {
+    display: block !important;
+  }
+  .comparison-row[hidden] {
+    display: table-row !important;
+  }
+  .comparison-group[hidden], .comparison-evidence[hidden] {
     display: block !important;
   }
 }

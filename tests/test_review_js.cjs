@@ -51,6 +51,41 @@ function deferred() {
   });
   return { promise, resolve, reject };
 }
+
+test("group filters keep workload rows, their evidence and summary navigation together", () => {
+  const handlers = {};
+  const a = { textContent: "Edit", dataset: { decision: "accepted", context: "Cache layer" } };
+  const b = { textContent: "No change", dataset: { decision: "accepted", context: "Cache layer" } };
+  const c = { textContent: "Edit", dataset: { decision: "rejected", context: "Native layer" } };
+  const groups = [[a, b], [c]].map(rows => ({ querySelectorAll: () => rows }));
+  const details = ["a", "b", "c"].map(id => ({ dataset: { for: id } }));
+  const elements = { a, b, c, count: {}, filter: { value: "" }, "decision-filter": { value: "all" } };
+  for (const id of ["filter", "decision-filter"])
+    elements[id].addEventListener = (event, fn) => { handlers[id] = fn; };
+  const anchor = { addEventListener: (event, fn) => { handlers.jump = fn; } };
+  vm.runInNewContext(source, { document: {
+    getElementById: id => elements[id],
+    querySelectorAll: selector => ({
+      ".comparison": [a, b, c], ".comparison-group": groups,
+      ".comparison-evidence": details, 'a[href^="#"]': [anchor],
+    })[selector] || [],
+  }});
+  elements.filter.value = "CACHE no change";
+  handlers.filter();
+  assert.equal(elements.count.textContent, "0 comparisons");
+  elements.filter.value = "no change";
+  handlers.filter();
+  assert.deepEqual([a.hidden,b.hidden,c.hidden], [true,false,true]);
+  assert.deepEqual(groups.map(g => g.hidden), [false,true]);
+  assert.deepEqual(details.map(d => d.hidden), [true,false,true]);
+  elements["decision-filter"].value = "rejected";
+  handlers["decision-filter"]();
+  assert.equal(elements.count.textContent, "0 comparisons");
+  handlers.jump();
+  assert.equal(elements.count.textContent, "3 comparisons");
+  assert.ok(groups.every(g => !g.hidden));
+  assert.ok(details.every(d => !d.hidden));
+});
 async function flush() {
   for (let i = 0; i < 12; i++) await Promise.resolve();
 }

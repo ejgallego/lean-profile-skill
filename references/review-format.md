@@ -37,9 +37,24 @@ Its optional `decision_status` is `accepted`, `rejected` or `inconclusive`;
 absence means unclassified. This status concerns the optimization, not whether
 the underlying observations belong in statistics.
 
+Optional comparison `group` is a plain-text experiment heading. Comparisons with
+the same group are displayed together, at the group's first position in the
+manifest. Use a short workload label for each member's `title`. Group members
+must have identical `note`, `decision` and `decision_status`: the renderer shows
+that shared explanation once. Distinct decisions should remain separate groups
+or ungrouped comparisons.
+
+Grouping changes presentation only. Each member retains its dataset, configuration
+names, timing boundary, inclusion decisions, statistics and anchor. No observations
+are pooled and no group estimate is calculated. With plots enabled, the first
+member's distribution is shown with the group; every other distribution remains
+under that workload's expandable evidence. Put the representative workload first.
+Missing estimates, censoring and measured exclusions remain visible in the table.
+
 Baselines and comparisons reference a dataset; they cannot override its metadata.
 Each dataset is parsed, hashed and copied once, regardless of the number of
-references. Three or more configurations get an overview table. Only requested
+references. Three or more configurations get an expandable overview table in
+the evidence section. Only requested
 contrasts are computed; the builder does not infer an N-way experimental design.
 
 ```json

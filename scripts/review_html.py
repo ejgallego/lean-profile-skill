@@ -15,14 +15,17 @@ def paragraphs(value):
     return "".join(f"<p>{E(p)}</p>" for p in value.split("\n\n"))
 
 
-def table(headers, rows):
+def table(headers, rows, row_attributes=None):
+    def attributes(index):
+        return ''.join(f' {key}="{E(str(value), quote=True)}"' for key, value in
+                       (row_attributes[index] if row_attributes else {}).items())
     return (
         '<div class="scroll"><table><thead><tr>'
         + "".join(f'<th scope="col">{header}</th>' for header in headers)
         + "</tr></thead><tbody>"
         + "".join(
-            "<tr>" + "".join(f"<td>{cell}</td>" for cell in row) + "</tr>"
-            for row in rows
+            "<tr" + attributes(index) + ">" + "".join(f"<td>{cell}</td>" for cell in row) + "</tr>"
+            for index, row in enumerate(rows)
         )
         + "</tbody></table></div>"
     )
@@ -109,9 +112,25 @@ def profile(item, out):
 
 def metadata(item):
     return (
-        f'<p class="identity">{E(item["cohort"])} · {E(item["boundary"])} · {E(item["identity"])}</p>'
+        f'<p class="identity">{E(item["cohort"])} · {E(item["boundary"])}</p><p class="identity">{E(item["identity"])}</p>'
         f'<details class="command"><summary>Exact command</summary><pre><code>{E(item["command"])}</code></pre></details>'
     )
+
+
+def evidence_details(item, body, label="Commands, resources and recorded outcomes"):
+    return ('<details class="measurement-details"><summary>' + E(label) + '</summary>'
+            + metadata(item) + body
+            + f'<p class="references"><a href="{item["copied_samples"]}">Shared raw dataset</a></p></details>')
+
+
+def availability(values):
+    """Keep missing/censored results and exclusions visible outside disclosures."""
+    measured_excluded = sum(r["phase"] == "measured" for r in values["excluded"])
+    if values["censored"]:
+        return 'Completed-only distribution; measured timeouts prevent a full-cohort estimate.'
+    if not values["statistics"]:
+        return 'No included measurements. ' + outcome_summary(values)
+    return f'{measured_excluded} measured outcomes excluded; see recorded outcomes.' if measured_excluded else ''
 
 
 def resource_note(series_data):
@@ -148,18 +167,24 @@ def distribution_table(configurations, summaries, outcome_notes=None):
 
 
 def render_baselines(items, plots):
-    baseline_html = []
+    if not items:
+        return ""
+    summaries = [item["series"]["statistics"].get("wall_s") for item in items]
+    scale, unit = time_unit([s["max"] for s in summaries if s])
+    rows = []
+    details = []
     for item in items:
-        baseline_html.append(
-            f'<article id="{item["id"]}"><h3>{E(item["title"])}</h3>'
-            + metadata(item)
-            + distribution_table([item["configuration"]], [item["series"]["statistics"].get("wall_s")])
-            + outcome_details(item["series"])
-            + resource_note(item["series"])
-            + paragraphs(item["note"])
-            + f'<p class="references"><a href="{item["copied_samples"]}">Shared raw dataset</a>; {len(item["excluded"])} warmup/excluded rows retained.</p></article>'
-        )
-    if plots and items:
+        values = item["series"]
+        warning = availability(values)
+        label = (f'<span id="{item["id"]}">{E(item["title"])}</span>'
+                 + f'<small>{E(item["configuration"])} · {E(item["boundary"])}</small>')
+        if warning:
+            label += f'<small class="availability">{E(warning)}</small>'
+        rows.append([label] + distribution(values["statistics"].get("wall_s"), scale))
+        details.append(evidence_details(item, paragraphs(item["note"]) + outcome_details(values)
+                                       + resource_note(values), item["title"] + ' — method and evidence'))
+    baseline_html = [table(["Workload", "Included n", f"Median, {unit}", f"IQR, {unit}", f"Range, {unit}"], rows)]
+    if plots:
         baseline_html.append(
             figure(
                 "figures/baselines.svg",
@@ -167,6 +192,7 @@ def render_baselines(items, plots):
                 "All included baseline wall times. Thick intervals show IQR; black ticks show medians; thin intervals show full ranges. These are distinct labeled workloads, not matched pairs.",
             )
         )
+    baseline_html.extend(details)
     return "".join(baseline_html)
 
 
@@ -204,7 +230,7 @@ def render_progress(progress, comparisons):
             saving = s["paired_saving_s"]
             rows.append(
                 [
-                    f'<a href="#{cid}">{E(c["title"])}</a><small>{E(c["cohort"])}</small>',
+                    f'<a href="#{cid}">{E(comparison_title(c))}</a>',
                     f"{duration(a)} → {duration(b)}",
                     f'{s["median_reduction_pct"]:+.3g}%' if saving else "Not estimated",
                     duration(saving["median"]) if saving else E(s["unavailable_reason"]),
@@ -217,9 +243,9 @@ def render_progress(progress, comparisons):
                 + table(
                     [
                         "Comparison / workload",
-                        "Control → candidate<br>included-completion median",
+                    "Median wall time<br>control → candidate",
                         "Median reduction",
-                        "Paired saving<br>median / availability",
+                    "Median paired saving",
                         "Faster pairs",
                     ],
                     rows,
@@ -241,7 +267,7 @@ def render_progress(progress, comparisons):
                     E(a["configuration"])
                     + " → "
                     + E(b["configuration"])
-                    + f'<small>{E(a["identity"])} → {E(b["identity"])}<br>{E(a["cohort"])} → {E(b["cohort"])}</small>',
+                    + f'<details><summary>Capture identities</summary><small>{E(a["identity"])} → {E(b["identity"])}<br>{E(a["cohort"])} → {E(b["cohort"])}</small></details>',
                 ]
             )
         progress_html.append(
@@ -249,7 +275,7 @@ def render_progress(progress, comparisons):
             + table(
                 [
                     "Observation",
-                    "Earlier → later<br>included-completion median",
+                    "Median wall time<br>earlier → later",
                     "Historical median reduction",
                     "Source configurations and identities",
                 ],
@@ -264,7 +290,8 @@ def render_comparison(item, profiles, out, plots):
     saving = s["paired_saving_s"]
     content = (
         f'<article class="comparison" data-decision="{item["decision_status"] or "unclassified"}" id="{item["id"]}"><h3>{E(item["title"])}</h3>'
-        + metadata(item)
+        + paragraphs(item["note"])
+        + f'<p class="identity">{E(item["boundary"])}</p>'
         + distribution_table([item["control"], item["candidate"]], [s["control"], s["candidate"]])
     )
     if saving:
@@ -272,32 +299,114 @@ def render_comparison(item, profiles, out, plots):
         content += f'<p>Paired saving (control − candidate), {delta_unit}: median <strong>{number(saving["median"], delta_scale, True)}</strong>, IQR {number(saving["iqr"], delta_scale)}, range {number(saving["min"], delta_scale, True)} to {number(saving["max"], delta_scale, True)}; candidate faster in {s["candidate_faster"]}/{saving["n"]} pairs.</p>'
     else:
         content += f'<p class="outcomes">{E(s["unavailable_reason"])}</p>'
-    for key in ("control", "candidate"):
-        content += f'<h4>{E(item[key])}: recorded outcomes</h4>' + outcome_details(s["series"][key])
-        resources = resource_note(s["series"][key])
-        if resources:
-            content += f'<p class="identity">{E(item[key])}</p>' + resources
-    if item["decision_status"]:
-        content += f'<p>Investigator decision: <strong>{E(item["decision_status"])}</strong>.</p>'
-    content += paragraphs(item["decision"]) + paragraphs(
-        item["note"]
-    )
+    for side in ("control", "candidate"):
+        warning = availability(s["series"][side])
+        if warning:
+            content += f'<p class="availability">{E(item[side])}: {E(warning)}</p>'
+    content += paragraphs(item["decision"])
     if plots:
         content += figure(
             f'figures/{item["id"]}.svg',
             item["title"],
             "Included completed observations only; bars span the 25th–75th percentiles, black ticks mark medians, and thin lines span full ranges. Paired estimates are withheld for measured censoring or incomplete included blocks. Descriptive spreads, not confidence intervals.",
         )
-    content += f'<p class="references">{len(s["excluded"])} warmup/excluded rows retained. <a href="{item["copied_samples"]}">Shared raw dataset</a></p>'
+    detail = ''
+    if item["decision_status"]:
+        detail += f'<p>Investigator decision: <strong>{E(item["decision_status"])}</strong>.</p>'
+    for key in ("control", "candidate"):
+        detail += f'<h4>{E(item[key])}: recorded outcomes</h4>' + outcome_details(s["series"][key]) + resource_note(s["series"][key])
+    content += evidence_details(item, detail)
     content += "".join(
         profile(p, out) for p in profiles if p.get("comparison") == item["id"]
     )
     return content + "</article>"
 
 
+def comparison_title(item):
+    return item['group'] + ' — ' + item['title'] if 'group' in item else item['title']
+
+
+def compact_distribution(stats):
+    if stats is None:
+        return 'Not estimated'
+    scale, unit = time_unit([stats['min'], stats['max']])
+    return (f'<strong>{number(stats["median"], scale)} {unit}</strong> [{number(stats["iqr"], scale)}]'
+            + f'<small>{number(stats["min"], scale)}–{number(stats["max"], scale)} {unit}; n={stats["n"]}</small>')
+
+
+def render_group(items, profiles, out, plots):
+    """Presentation only: each row keeps its own validated dataset and contrast."""
+    first = items[0]
+    rows, attrs, evidence = [], [], []
+    context = ' '.join(first[key] for key in ('group', 'note', 'decision'))
+    for index, item in enumerate(items):
+        s = item['statistics']
+        saving = s['paired_saving_s']
+        label = E(item['title']) + f'<small>{E(item["boundary"])}</small>'
+        for side in ('control', 'candidate'):
+            warning = availability(s['series'][side])
+            if warning:
+                label += f'<small class="availability">{E(item[side])}: {E(warning)}</small>'
+        rows.append([
+            label,
+            compact_distribution(s['control']) + f'<small>{E(item["control"])}</small>',
+            compact_distribution(s['candidate']) + f'<small>{E(item["candidate"])}</small>',
+            f'{s["median_reduction_pct"]:+.3g}%' if saving else 'Not estimated',
+            compact_distribution(saving) if saving else E(s['unavailable_reason']),
+            f'{s["candidate_faster"]}/{saving["n"]}' if saving else '—',
+        ])
+        attrs.append({'id':item['id'], 'class':'comparison comparison-row',
+                      'data-decision':item['decision_status'] or 'unclassified',
+                      'data-context':context + ' ' + item['cohort'] + ' ' + item['identity']})
+        detail = ''
+        for side in ('control', 'candidate'):
+            detail += f'<h4>{E(item[side])}: recorded outcomes</h4>' + outcome_details(s['series'][side]) + resource_note(s['series'][side])
+        if item['decision_status']:
+            detail += f'<p>Investigator decision: {E(item["decision_status"])}</p>'
+        if plots and index > 0:
+            detail += figure(f'figures/{item["id"]}.svg', comparison_title(item),
+                             'Included observations, median, IQR and range; paired savings on a separate axis.')
+        evidence.append(f'<div class="comparison-evidence" data-for="{item["id"]}">'
+                        + evidence_details(item, detail, item['title'] + ' — distributions and evidence') + '</div>')
+        evidence.extend(f'<div class="comparison-evidence" data-for="{item["id"]}">' + profile(p,out) + '</div>'
+                        for p in profiles if p.get('comparison') == item['id'])
+    content = ('<article class="comparison-group"><h3>' + E(first['group']) + '</h3>' + paragraphs(first['note'])
+               + table(['Workload', 'Control: median [IQR]', 'Candidate: median [IQR]',
+                        'Median reduction', 'Paired saving: median [IQR]', 'Faster pairs'], rows, attrs)
+               + paragraphs(first['decision']))
+    if plots:
+        content += (f'<div class="comparison-evidence" data-for="{first["id"]}">'
+                    + figure(f'figures/{first["id"]}.svg', comparison_title(first),
+                             first['title'] + '. All included observations; median, IQR and full range. Other workload plots are in the evidence below.') + '</div>')
+    return content + ''.join(evidence) + '</article>'
+
+
+def render_comparisons(items, profiles, out, plots):
+    rendered, done = [], set()
+    for item in items:
+        group = item.get('group')
+        if group is None:
+            rendered.append(render_comparison(item, profiles, out, plots))
+        elif group not in done:
+            done.add(group)
+            rendered.append(render_group([c for c in items if c.get('group') == group], profiles, out, plots))
+    return ''.join(rendered)
+
+
+def comparison_index(items):
+    links, seen = [], set()
+    for item in items:
+        key = ('group', item['group']) if 'group' in item else ('comparison', item['id'])
+        if key not in seen:
+            seen.add(key)
+            links.append(f'<li><a href="#{item["id"]}">{E(item.get("group", item["title"]))}</a></li>')
+    if len(links) < 4:
+        return ''
+    return '<nav class="experiment-index" aria-label="Experiment index"><ol>' + ''.join(links) + '</ol></nav>'
+
+
 def render_page(model, out, template, plots=False):
-    comparison_html = [render_comparison(item, model["profiles"], out, plots)
-                       for item in model["comparisons"]]
+    comparison_html = render_comparisons(model["comparisons"], model["profiles"], out, plots)
     attribution_html = "".join(
         f'<h3>{E(a["title"])}</h3>' + paragraphs(a["text"])
         for a in model["attribution"]
@@ -314,11 +423,10 @@ def render_page(model, out, template, plots=False):
             navigation.append(f'<a href="#{sid}">{title}</a>')
 
     section("baselines", "Baseline", render_baselines(model["baselines"], plots))
-    section("datasets", "Multi-configuration overview", render_datasets(model["datasets"]))
     section("progress", "Summary of improvements", render_progress(model.get("progress"), model["comparisons"]))
     section("attribution", "Phase attribution and profiles", attribution_html)
     methods = (
-        "<p>Compare each candidate with its own control, workload and timing boundary. IQR uses inclusive linear interpolation. A median of paired differences can differ from the difference of group medians. Decisions are supplied by the investigator; they are not inferred from positive savings.</p>"
+        "<p>Each workload is compared with its own control. Tables show median [IQR], full range and included n. Paired saving is control minus candidate within recorded rounds; positive is faster. These descriptive spreads are not confidence intervals. Decisions are supplied by the investigator.</p>"
         '<label for="filter">Find an experiment</label> <input id="filter" type="search"> '
         '<label for="decision-filter">Decision</label> <select id="decision-filter">'
         '<option value="all">All decisions</option><option value="accepted">Accepted</option>'
@@ -328,16 +436,19 @@ def render_page(model, out, template, plots=False):
     section(
         "measurements",
         "Experiments",
-        methods + "".join(comparison_html) if comparison_html else "",
+        methods + comparison_index(model["comparisons"]) + comparison_html if comparison_html else "",
     )
-    links = " · ".join(
-        artifact_link(item["artifact_path"], item["title"], out) for item in model["links"]
+    links = "".join(
+        '<li>' + artifact_link(item["artifact_path"], item["title"], out) + '</li>' for item in model["links"]
     )
     evidence = (
-        (f"<p>{links}</p>" if links else "")
+        (f'<details><summary>Source files, validation and reproduction links ({len(model["links"])})</summary><ul>{links}</ul></details>' if links else "")
         + '<p><a href="review-data.json">Statistics and provenance</a> · <a href="source-manifest.json">Original input manifest</a></p>'
     )
     evidence += "<p>Each CSV or JSONL dataset is snapshotted once for all its contrasts. Profile files remain linked at their original locations; serve their common ancestor over HTTP. Perfetto opens its online UI and receives the selected trace locally in the browser. This builder runs no benchmarks and does not validate a trace’s internal structure.</p>"
+    datasets = render_datasets(model["datasets"])
+    if datasets:
+        evidence += '<details id="datasets"><summary>Multi-configuration overview</summary>' + datasets + '</details>'
     section("evidence", "Evidence and reproduction", evidence)
     replacements = dict(
         TITLE=E(model["title"]),

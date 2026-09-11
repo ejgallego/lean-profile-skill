@@ -8,15 +8,27 @@ function filter() {
   let count = 0;
   for (const card of document.querySelectorAll(".comparison")) {
     card.hidden =
-      !card.textContent.toLowerCase().includes(q) ||
+      !(card.textContent + " " + (card.dataset.context || "")).toLowerCase().includes(q) ||
       (decision !== "all" && card.dataset.decision !== decision);
     if (!card.hidden) count++;
   }
   $("count").textContent = `${count} comparisons`;
+  for (const group of document.querySelectorAll(".comparison-group"))
+    group.hidden = !Array.from(group.querySelectorAll(".comparison")).some(card => !card.hidden);
+  for (const detail of document.querySelectorAll(".comparison-evidence"))
+    detail.hidden = $(detail.dataset.for).hidden;
 }
 $("filter")?.addEventListener("input", filter);
 $("decision-filter")?.addEventListener("change", filter);
 filter();
+// Summary links must still reach their row after the reader filters experiments.
+for (const link of document.querySelectorAll('a[href^="#"]'))
+  link.addEventListener("click", () => {
+    if (!$("filter")) return;
+    $("filter").value = "";
+    $("decision-filter").value = "all";
+    filter();
+  });
 for (const button of document.querySelectorAll("[data-viewer]"))
   button.addEventListener("click", () => {
     const frame = $(button.dataset.viewer);
