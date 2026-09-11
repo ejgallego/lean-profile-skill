@@ -7,6 +7,7 @@ import argparse
 import datetime as dt
 import hashlib
 import json
+import math
 import os
 import platform
 import signal
@@ -47,7 +48,7 @@ def parse_metadata(values: list[str]) -> dict[str, str]:
 
 def write_json(path: Path, value: Any) -> None:
     path.write_text(
-        json.dumps(value, indent=2, sort_keys=True) + "\n",
+        json.dumps(value, indent=2, sort_keys=True, allow_nan=False) + "\n",
         encoding="utf-8",
     )
 
@@ -383,6 +384,29 @@ def summarize(values: list[int]) -> dict[str, float | int]:
     }
 
 
+def summarize_comparison(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Summarize a successful capture; positive savings mean a faster candidate."""
+    samples: dict[str, list[int]] = {"baseline": [], "candidate": []}
+    pairs: dict[int, dict[str, int]] = {}
+    for row in rows:
+        if row["phase"] != "measured":
+            continue
+        samples[row["label"]].append(row["elapsed_ns"])
+        pairs.setdefault(row["pass"], {})[row["label"]] = row["elapsed_ns"]
+    baseline = summarize(samples["baseline"])
+    candidate = summarize(samples["candidate"])
+    savings = [pairs[p]["baseline"] - pairs[p]["candidate"] for p in sorted(pairs)]
+    before, after = baseline["median_ns"], candidate["median_ns"]
+    return {
+        "baseline": baseline,
+        "candidate": candidate,
+        "baseline_minus_candidate_median_ns": before - after,
+        "median_reduction_pct": 100 * (1 - after / before) if before else None,
+        "paired_saving_median_ns": statistics.median(savings),
+        "paired_savings_ns": savings,
+    }
+
+
 def comparison_schedule(
     passes: int, warmups: int
 ) -> Iterator[tuple[str, int, int, str]]:
@@ -409,7 +433,10 @@ def main() -> int:
     parser.add_argument("--passes", type=int, default=2, help="positive even pass count")
     parser.add_argument("--warmups", type=int, default=1, help="warmups per command")
     parser.add_argument("--expected-exit-code", type=int, default=0)
-    parser.add_argument("--timeout-seconds", type=float)
+    parser.add_argument(
+        "--timeout-seconds", type=float,
+        help="Finite positive deadline per invocation; omit for no deadline",
+    )
     parser.add_argument(
         "--artifact",
         action="append",
@@ -434,8 +461,10 @@ def main() -> int:
         parser.error("--passes must be a positive even number")
     if args.warmups < 0:
         parser.error("--warmups must be nonnegative")
-    if args.timeout_seconds is not None and args.timeout_seconds <= 0:
-        parser.error("--timeout-seconds must be positive")
+    if args.timeout_seconds is not None and (
+        not math.isfinite(args.timeout_seconds) or args.timeout_seconds <= 0
+    ):
+        parser.error("--timeout-seconds must be finite and positive")
 
     try:
         baseline = parse_command(args.baseline, "--baseline")
@@ -604,18 +633,9 @@ def main() -> int:
             return 1
 
     identity_check = capture_identity_check()
-    measured = [row for row in rows if row["phase"] == "measured"]
-    baseline_ns = [row["elapsed_ns"] for row in measured if row["label"] == "baseline"]
-    candidate_ns = [row["elapsed_ns"] for row in measured if row["label"] == "candidate"]
-    paired_deltas = []
-    for pass_number in range(1, args.passes + 1):
-        pair = {row["label"]: row["elapsed_ns"] for row in measured if row["pass"] == pass_number}
-        paired_deltas.append(pair["candidate"] - pair["baseline"])
-
-    baseline_summary = summarize(baseline_ns)
-    candidate_summary = summarize(candidate_ns)
-    baseline_median = float(baseline_summary["median_ns"])
-    candidate_median = float(candidate_summary["median_ns"])
+    summary = summarize_comparison(rows)
+    baseline_median = summary["baseline"]["median_ns"]
+    candidate_median = summary["candidate"]["median_ns"]
     warnings = list(preflight_warnings)
     if min(baseline_median, candidate_median) < 100_000_000:
         warnings.append(
@@ -625,20 +645,7 @@ def main() -> int:
         warnings.append(
             "Two passes are one AB/BA cycle and should be treated as screening evidence."
         )
-    summary = {
-        "baseline": baseline_summary,
-        "candidate": candidate_summary,
-        "candidate_minus_baseline_median_ns": candidate_median - baseline_median,
-        "candidate_minus_baseline_median_percent": (
-            (candidate_median - baseline_median) / baseline_median * 100
-            if baseline_median
-            else None
-        ),
-        "paired_delta_median_ns": statistics.median(paired_deltas),
-        "paired_deltas_ns": paired_deltas,
-        "identity_check": identity_check,
-        "warnings": warnings,
-    }
+    summary.update(identity_check=identity_check, warnings=warnings)
     write_json(out_dir / "summary.json", summary)
     print(json.dumps(summary, indent=2, sort_keys=True))
     print(f"Raw evidence: {out_dir}")

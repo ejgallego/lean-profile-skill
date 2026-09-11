@@ -299,6 +299,12 @@ class ImportTests(unittest.TestCase):
         comparison = model["comparisons"][0]["statistics"]
         self.assertEqual(comparison["paired_saving_s"]["n"], 2)
         self.assertEqual(set(comparison["pair_ids"]), {"1", "2"})
+        summary = json.loads((capture / "summary.json").read_text())
+        for report_saving, harness_saving in zip(comparison["savings"], summary["paired_savings_ns"]):
+            self.assertAlmostEqual(report_saving, harness_saving / 1_000_000_000)
+        self.assertAlmostEqual(comparison["paired_saving_s"]["median"],
+                               summary["paired_saving_median_ns"] / 1_000_000_000)
+        self.assertAlmostEqual(comparison["median_reduction_pct"], summary["median_reduction_pct"])
         self.assertIn('href="dataset-00.jsonl"', page.read_text())
 
 

@@ -170,7 +170,7 @@ class ReportExtensionsTests(unittest.TestCase):
         original = source.read_text()
         for bad in (original.replace("1024", "nan"), original.replace("included", "accepted"),
                     original.replace("system_s", "user_s"), original.replace(",true,", ",TRUE,"),
-                    original + "extra,cells\n"):
+                    original + "extra,cells\n", original + '"unterminated field'):
             with self.subTest(bad=bad):
                 source.write_text(bad)
                 with self.assertRaises(ValueError):

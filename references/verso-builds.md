@@ -176,7 +176,7 @@ The report should connect three views without merging their timing envelopes:
 3. An affected-module Lean profile, with finer Verso markers where needed.
 
 Keep raw captures and transformation provenance; instrumented
-profiles explain accepted uninstrumented public measurements rather than replace
+profiles explain included uninstrumented public measurements rather than replace
 them. No-change and clean-build costs remain regression dimensions even when
 edit-to-view is the current priority.
 

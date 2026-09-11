@@ -126,12 +126,17 @@ and any extra nested fields:
   nonnegative. Each reported resource must cover all included observations in
   that configuration, not a smaller subset.
 
-CSV headers must be unique and rows must have the correct field count. Extra
-fields are retained. The obsolete observation field `accepted` is rejected;
+CSV headers must be unique and rows must have the correct field count. Quoted
+fields can contain commas, escaped quotes and newlines; malformed quoted fields
+are rejected. Empty physical lines between records are skipped. Extra fields
+are retained. The obsolete observation field `accepted` is rejected;
 use `included`. JSONL is not converted through CSV: typed/nested fields and
 integer clock readings survive in the archive and model.
 JSONL parsing errors identify the source file and physical line, including blank
 lines; syntax errors also report the column.
+CSV field-validation errors identify the record's starting physical line;
+quoting errors identify the line where the parser detected them. Both formats
+report the source file for invalid UTF-8.
 
 The general reader validates structure and consistency, not the truth of
 investigator records. Link correctness evidence and explain exclusions. The

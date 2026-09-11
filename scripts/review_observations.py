@@ -8,6 +8,9 @@ import json
 import math
 import statistics
 
+REQUIRED_FIELDS = {"id", "configuration", "block", "phase", "outcome", "exit_status",
+                   "validated", "included", "exclude_reason"}
+
 
 def json_value(raw):
     def constant(value):
@@ -50,13 +53,38 @@ def stats(values):
     return result
 
 
-def jsonl_rows(raw, source):
-    """Parse a JSONL snapshot with physical file locations, including blank lines."""
+def decode_snapshot(raw, source):
+    """Decode either observation format without losing source context on errors."""
     try:
-        content = raw.decode("utf-8-sig")
+        return raw.decode("utf-8-sig")
     except UnicodeDecodeError as error:
         raise ValueError(f"{source}: invalid UTF-8: {error}") from error
-    for line, value in enumerate(content.split("\n"), 1):
+
+
+def csv_rows(raw, source):
+    """Yield strict CSV records with their starting physical line numbers."""
+    reader = csv.reader(io.StringIO(decode_snapshot(raw, source), newline=""), strict=True)
+    try:
+        fields = next(reader, [])
+        if not REQUIRED_FIELDS <= set(fields) or len(fields) != len(set(fields)):
+            raise ValueError(f"{source}: require unique columns including {sorted(REQUIRED_FIELDS)}")
+        while True:
+            line = reader.line_num + 1
+            values = next(reader, None)
+            if values is None:
+                break
+            if not values:  # Empty physical lines are not observation records.
+                continue
+            if len(values) != len(fields):
+                raise ValueError(f"{source}:{line}: wrong number of CSV fields")
+            yield line, dict(zip(fields, values))
+    except csv.Error as error:
+        raise ValueError(f"{source}:{reader.line_num}: invalid CSV: {error}") from error
+
+
+def jsonl_rows(raw, source):
+    """Parse a JSONL snapshot with physical file locations, including blank lines."""
+    for line, value in enumerate(decode_snapshot(raw, source).split("\n"), 1):
         if not value.strip():
             continue
         try:
@@ -88,20 +116,12 @@ def observations(raw, configurations, source="observations", *, format="csv",
         raise ValueError("Configurations must be nonempty, unique names")
     if type(expected_exit_status) is not int:
         raise ValueError("expected_exit_status must be an integer")
-    required = {"id", "configuration", "block", "phase", "outcome", "exit_status",
-                "validated", "included", "exclude_reason"}
     if format == "csv":
-        reader = csv.DictReader(io.StringIO(raw.decode("utf-8-sig"), newline=""))
-        fields = reader.fieldnames or []
-        if not required <= set(fields) or len(fields) != len(set(fields)):
-            raise ValueError(f"{source}: require unique columns including {sorted(required)}")
-        inputs = list(enumerate(reader, 2))
+        inputs = csv_rows(raw, source)
     elif format == "jsonl":
-        inputs = list(jsonl_rows(raw, source))
+        inputs = jsonl_rows(raw, source)
     else:
         raise ValueError("Observation format must be csv or jsonl")
-    if not inputs:
-        raise ValueError(f"{source}: empty observation dataset")
     groups = {name: [] for name in configurations}
     ids, blocks, slots = set(), set(), set()
     for line, row in inputs:
@@ -110,10 +130,8 @@ def observations(raw, configurations, source="observations", *, format="csv",
         def fail(message):
             raise ValueError(f"{prefix}: {message}")
 
-        if not isinstance(row, dict) or not required <= row.keys():
+        if not isinstance(row, dict) or not REQUIRED_FIELDS <= row.keys():
             fail("missing required observation fields")
-        if None in row or (format == "csv" and any(v is None for v in row.values())):
-            fail("wrong number of CSV fields")
         if "accepted" in row:
             fail("use included for statistical inclusion; accepted is a decision")
         for key in ("id", "configuration", "block", "phase", "outcome"):
@@ -217,6 +235,8 @@ def observations(raw, configurations, source="observations", *, format="csv",
             slots.add(key)
             record["slot"] = slot
         groups[row["configuration"]].append(record)
+    if not ids:
+        raise ValueError(f"{source}: empty observation dataset")
     return groups
 
 

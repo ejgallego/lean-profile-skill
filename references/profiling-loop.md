@@ -183,7 +183,7 @@ Two passes provide one AB/BA cycle for screening. Increase to a larger even
 count for acceptance work, and repeat `--artifact` for every relevant input.
 Use each `--metadata` key once. The script refuses to overwrite an existing
 output directory and stores raw JSONL rows, command and artifact identities,
-dirty tracked patches, stdout/stderr, paired deltas, and warnings about short or
+dirty tracked patches, stdout/stderr, paired savings, and warnings about short or
 minimally repeated runs. It hashes the selected `perf` executable and rechecks
 command, profiler, artifact, Git revision, and tracked-diff identities after
 execution. Each completed profiler run must produce a nonempty counter file;
@@ -193,6 +193,9 @@ ledger. Run rows distinguish ordinary exit, timeout, launch failure, evidence
 failure, and interruption. An interrupted run exits 130 after recording its row
 and final identity check. On POSIX systems, timeout and interruption terminate
 the command's process group so descendant work does not contaminate later runs.
+Use a finite, positive `--timeout-seconds` to bound each invocation; omit it for
+no harness deadline. See [command-import.md](command-import.md#summary-conventions)
+for summary field names and the shared positive-means-faster convention.
 
 Pass `--perf-events` with
 `cycles:u,instructions:u,branches:u,branch-misses:u,cache-references:u` only

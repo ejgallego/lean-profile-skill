@@ -22,7 +22,7 @@ map a concluded ledger status to `decision_status`, not statistical `included`.
 - `endpoint`: expected and observed status/terminal boundary
 - `attribution`: pre-change sampled hotspot and caller
 - `mechanism`: upstream/runtime surface and generated C/IR explanation
-- `results`: raw artifact link, pass/sequence rows, paired deltas, and aggregate
+- `results`: raw artifact link, pass/sequence rows, paired savings, and aggregate
   summaries
 - `post_profile`: whether the predicted hotspot movement occurred
 - `correctness`: commands and outcomes
@@ -31,8 +31,10 @@ map a concluded ledger status to `decision_status`, not statistical `included`.
 
 ## Compact JSONL Example
 
-Keep one logical record per line when maintaining a ledger. This formatted
-example is the same object written compactly in JSONL:
+Keep one logical record per line in a JSONL ledger; the example below is expanded
+for readability. Use the shared
+[summary conventions](command-import.md#summary-conventions): positive savings
+mean faster, negative mean slower.
 
 ```json
 {
@@ -50,7 +52,7 @@ example is the same object written compactly in JSONL:
     "build": "release",
     "events": [],
     "warmups": 1,
-    "repetitions": 10,
+    "repetitions": 4,
     "order": "AB/BA"
   },
   "endpoint": {"expected": "exit 0", "observed": "exit 0"},
@@ -59,8 +61,8 @@ example is the same object written compactly in JSONL:
   "results": {
     "raw": "_profiles/compare-001",
     "runs_jsonl": "_profiles/compare-001/runs.jsonl",
-    "paired_deltas_ns": [1200000, -300000, 800000, 1100000],
-    "summary": {"candidate_minus_baseline_median_percent": 1.2}
+    "paired_savings_ns": [-1200000, 300000, -800000, -1100000],
+    "summary": {"median_reduction_pct": -1.2}
   },
   "post_profile": "The original caller remained.",
   "correctness": [{"command": "lake test", "outcome": "passed"}],

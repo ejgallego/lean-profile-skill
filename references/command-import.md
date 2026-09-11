@@ -58,6 +58,24 @@ The generated comparison has an explanatory decision but no `decision_status`.
 An investigator may subsequently classify the optimization; the importer does
 not accept or reject it from timing alone.
 
+## Summary conventions
+
+New harness summaries and reports both use **positive savings for a faster
+candidate**, negative for a slower one:
+
+- Harness `paired_savings_ns`: baseline elapsed minus candidate elapsed for
+  each measured pass, in pass order; `paired_saving_median_ns` is their median.
+- Harness `baseline_minus_candidate_median_ns`: difference of group medians,
+  not the median of paired savings.
+- Shared `median_reduction_pct`: `100 × (1 − candidate_median / control_median)`;
+  the harness calls the control `baseline`.
+- Report `paired_saving_s`: descriptive statistics of matched savings in seconds.
+
+The importer reads raw `runs.jsonl`, not the harness's `summary.json`, and the
+report recomputes statistics over explicitly included observations. Exclusions
+can therefore change the results. Older retained captures remain usable through
+their raw runs; no old summary-field aliases are emitted or interpreted.
+
 ## Explicit output-validation records
 
 The validation document binds the exact captured manifest and JSONL bytes with

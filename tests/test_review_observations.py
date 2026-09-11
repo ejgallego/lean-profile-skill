@@ -31,6 +31,48 @@ class ObservationTests(unittest.TestCase):
         for key in ("control", "candidate", "paired_saving_s", "pair_ids"):
             self.assertEqual(a[key], b[key])
 
+    def test_csv_preserves_multiline_fields_and_physical_record_lines(self):
+        for newline in (b"\n", b"\r\n", b"\r"):
+            with self.subTest(newline=newline):
+                rows = [sample("control", 1, note='first, "quoted" line\nsecond line'),
+                        sample("control", 2, note="last line")]
+                raw = csv_bytes(rows).replace(b"\n", newline)
+                parsed = observations(b"\xef\xbb\xbf" + raw, ["control"], "capture.csv")
+                self.assertEqual([r["line"] for r in parsed["control"]], [2, 4])
+                self.assertEqual(parsed["control"][0]["note"], rows[0]["note"].replace("\n", newline.decode()))
+                bad = csv_bytes([
+                    rows[0], rows[1] | dict(exit_status="bad")
+                ]).replace(b"\n", newline)
+                with self.assertRaisesRegex(ValueError, r"capture\.csv:4: exit_status"):
+                    observations(bad, ["control"], "capture.csv")
+
+    def test_csv_blank_lines_do_not_become_observations(self):
+        raw = csv_bytes([sample("control", 1)])
+        header, row = raw.split(b"\n", 1)
+        parsed = observations(header + b"\n\n\n" + row + b"\n", ["control"])
+        self.assertEqual(len(parsed["control"]), 1)
+        self.assertEqual(parsed["control"][0]["line"], 4)
+
+    def test_csv_quoting_and_field_counts_have_source_context(self):
+        raw = csv_bytes([sample("control", 1)])
+        header = raw.split(b"\n", 1)[0] + b",note\n"
+        row = raw.split(b"\n", 1)[1].rstrip(b"\n")
+        for tail in (b',"unfinished', b',"closed"junk\n', b",extra,field\n", b"\n"):
+            with self.subTest(tail=tail):
+                with self.assertRaisesRegex(ValueError, r"capture\.csv:2:"):
+                    observations(header + row + tail, ["control"], "capture.csv")
+        with self.assertRaisesRegex(ValueError, r"capture\.csv:1: invalid CSV"):
+            observations(b'"unfinished header', ["control"], "capture.csv")
+
+    def test_both_formats_report_invalid_utf8_and_empty_datasets(self):
+        header = csv_bytes([sample("control", 1)]).split(b"\n", 1)[0] + b"\n"
+        for format, empty in (("csv", header), ("jsonl", b"\n\n")):
+            with self.subTest(format=format):
+                with self.assertRaisesRegex(ValueError, rf"capture\.{format}: invalid UTF-8"):
+                    observations(b"\xff", ["control"], f"capture.{format}", format=format)
+                with self.assertRaisesRegex(ValueError, "empty observation dataset"):
+                    observations(empty, ["control"], format=format)
+
     def test_three_way_permutations_preserve_slots_and_explicit_contrasts(self):
         rows = []
         for block, order in enumerate(itertools.permutations(["a", "b", "c"]), 1):

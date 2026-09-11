@@ -14,6 +14,8 @@ from pathlib import Path
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 COMPARE_SCRIPT = REPOSITORY_ROOT / "scripts" / "compare_commands.py"
+sys.path.insert(0, str(REPOSITORY_ROOT / "scripts"))
+from compare_commands import summarize_comparison, write_json
 
 
 class CompareCommandsTests(unittest.TestCase):
@@ -65,6 +67,7 @@ class CompareCommandsTests(unittest.TestCase):
             stderr=subprocess.PIPE,
             text=True,
             check=False,
+            timeout=30,
         )
 
     def read_json(self, path: Path) -> dict[str, object]:
@@ -190,7 +193,11 @@ class CompareCommandsTests(unittest.TestCase):
             summary = self.read_json(evidence / "summary.json")
             self.assertEqual(summary["baseline"]["count"], 2)
             self.assertEqual(summary["candidate"]["count"], 2)
-            self.assertEqual(len(summary["paired_deltas_ns"]), 2)
+            measured = {(r["pass"], r["label"]): r["elapsed_ns"]
+                        for r in rows if r["phase"] == "measured"}
+            self.assertEqual(summary["paired_savings_ns"],
+                             [measured[p, "baseline"] - measured[p, "candidate"]
+                              for p in (1, 2)])
             self.assertIn("screening evidence", " ".join(summary["warnings"]))
 
             baseline_stdout = evidence / str(rows[0]["stdout"])
@@ -245,6 +252,47 @@ class CompareCommandsTests(unittest.TestCase):
             self.assertEqual(result.returncode, 2)
             self.assertIn("positive even number", result.stderr)
             self.assertFalse((cwd / "evidence").exists())
+
+    def test_invalid_timeout_is_refused_before_launch_or_output(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            cwd = Path(temporary)
+            command = [sys.executable, "-c", "from pathlib import Path; Path('launched').touch()"]
+            for value in ("0", "-1", "nan", "NaN", "inf", "-inf", "1e309"):
+                with self.subTest(value=value):
+                    result = self.run_compare(
+                        cwd, baseline=command, candidate=command,
+                        extra_args=[f"--timeout-seconds={value}"],
+                    )
+                    self.assertEqual(result.returncode, 2, result.stderr)
+                    self.assertIn("finite and positive", result.stderr)
+                    self.assertNotIn("Traceback", result.stderr)
+                    self.assertFalse((cwd / "evidence").exists())
+                    self.assertFalse((cwd / "launched").exists())
+
+    def test_summary_uses_matched_savings_not_difference_of_medians(self) -> None:
+        # Asymmetric samples distinguish group medians from paired differences.
+        rows = []
+        for p, (a, b) in enumerate(zip((10, 100, 20, 30), (9, 90, 25, 29)), 1):
+            for name, value in (("candidate", b), ("baseline", a)):
+                rows.append(dict(phase="measured", label=name, elapsed_ns=value, **{"pass": p}))
+        rows.append(dict(phase="warmup", label="baseline", elapsed_ns=1_000_000, **{"pass": 1}))
+        result = summarize_comparison(rows)
+        self.assertEqual(result["baseline"]["count"], 4)
+        self.assertEqual(result["paired_savings_ns"], [1, 10, -5, 1])
+        self.assertEqual(result["paired_saving_median_ns"], 1)
+        self.assertEqual(result["baseline_minus_candidate_median_ns"], -2)
+        self.assertAlmostEqual(result["median_reduction_pct"], -8)
+        self.assertNotIn("paired_deltas_ns", result)
+        self.assertNotIn("candidate_minus_baseline_median_percent", result)
+
+    def test_json_writer_rejects_nonfinite_values_before_creating_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "manifest.json"
+            for value in (float("nan"), float("inf"), float("-inf")):
+                with self.subTest(value=value):
+                    with self.assertRaises(ValueError):
+                        write_json(path, {"nested": [value]})
+                    self.assertFalse(path.exists())
 
     @unittest.skipUnless(os.name == "posix", "executable permission is POSIX-specific")
     def test_non_executable_command_is_refused_during_preflight(self) -> None:
