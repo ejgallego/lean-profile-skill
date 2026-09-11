@@ -77,7 +77,14 @@ def load(manifest_path):
             raise ValueError(f"Artifact must exist: {path}")
         return path
 
-    datasets, groups = {}, {}
+    hashes = {}
+
+    def artifact_hash(path):
+        if path not in hashes:
+            hashes[path] = digest(path)
+        return hashes[path]
+
+    datasets = {}
     for index, item in enumerate(array(spec, "datasets")):
         entry = {key: text(item, key) for key in METADATA}
         entry.update(id=identifier(item), title=text(item, "title"))
@@ -98,7 +105,7 @@ def load(manifest_path):
             series={name: series(rows) for name, rows in parsed.items()},
         )
         model["datasets"].append(entry)
-        datasets[entry["id"]], groups[entry["id"]] = entry, parsed
+        datasets[entry["id"]] = entry
         copies.append((name, snapshot))
 
     for kind in ("baselines", "comparisons"):
@@ -127,7 +134,7 @@ def load(manifest_path):
                 if status is not None and status not in ("accepted", "rejected", "inconclusive"):
                     raise ValueError("decision_status must be accepted, rejected or inconclusive")
                 entry["decision_status"] = status
-                entry["statistics"] = paired(groups[dataset_id], entry["control"], entry["candidate"])
+                entry["statistics"] = paired(dataset["series"], entry["control"], entry["candidate"])
             model[kind].append(entry)
 
     comparison_ids = {c["id"] for c in model["comparisons"]}
@@ -143,12 +150,16 @@ def load(manifest_path):
             entry["comparison"] = comparison
         source = artifact(item.get("path"))
         entry.update(kind=kind, id=identifier(item, f"profile-{index:02}"),
-                     artifact_path=str(source), sha256=digest(source))
+                     artifact_path=str(source), sha256=artifact_hash(source))
         model["profiles"].append(entry)
+    seen_links = set()
     for item in array(spec, "links"):
         title = text(item, "title")
         source = artifact(item.get("path"))
-        model["links"].append(dict(title=title, artifact_path=str(source), sha256=digest(source)))
+        # Preserve distinct annotations while suppressing exact duplicate links.
+        if (source, title) not in seen_links:
+            model["links"].append(dict(title=title, artifact_path=str(source), sha256=artifact_hash(source)))
+            seen_links.add((source, title))
     for item in array(spec, "attribution"):
         model["attribution"].append(dict(title=text(item, "title"), text=text(item, "text")))
 

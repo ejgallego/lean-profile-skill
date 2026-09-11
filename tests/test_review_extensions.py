@@ -3,6 +3,7 @@
 import copy
 import csv
 import hashlib
+import html
 import importlib.util
 import io
 import json
@@ -17,7 +18,8 @@ SKILL = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SKILL / "scripts"))
 import build_review as review
 import review_data
-from review_observations import observations, paired
+from review_observations import observations
+from review_helpers import paired_rows
 
 
 class ReportExtensionsTests(unittest.TestCase):
@@ -52,6 +54,7 @@ class ReportExtensionsTests(unittest.TestCase):
         page = review.build(self.manifest, self.out).read_text()
         self.assertIn("Directly measured cumulative comparisons", page)
         self.assertIn("Historical endpoints — unpaired", page)
+        self.assertEqual(page.count(html.escape(self.spec["progress"]["note"])), 1)
 
     def test_three_way_dataset_is_copied_and_read_once_for_all_consumers(self):
         source = self.root / "inputs/three-way.jsonl"
@@ -71,6 +74,28 @@ class ReportExtensionsTests(unittest.TestCase):
         self.assertIn("Multi-configuration overview", page)
         self.assertIn("Current versus reference", page)
         self.assertIn("Warmup-only timeout", page)
+
+    def test_contrasts_reuse_the_dataset_series(self):
+        with patch.object(review_data, "series", wraps=review_data.series) as summarize:
+            model, _, _ = review_data.load(self.manifest)
+        self.assertEqual(summarize.call_count, sum(len(d["configurations"]) for d in model["datasets"]))
+        datasets = {d["id"]: d for d in model["datasets"]}
+        for contrast in model["comparisons"]:
+            for side in ("control", "candidate"):
+                self.assertIs(contrast["statistics"]["series"][side],
+                              datasets[contrast["dataset"]]["series"][contrast[side]])
+
+    def test_artifact_hash_cache_spans_profiles_and_links_but_not_builds(self):
+        source = self.root / "inputs/trace.json"
+        self.spec["links"] = [dict(title="Trace", path="trace.json")] * 2
+        self.write()
+        with patch.object(review_data, "digest", wraps=review_data.digest) as hashes:
+            first, _, _ = review_data.load(self.manifest)
+            self.assertEqual(sum(call.args[0] == source for call in hashes.call_args_list), 1)
+        self.assertEqual(len(first["links"]), 1)
+        source.write_text('{"traceEvents":[],"changed":true}')
+        second, _, _ = review_data.load(self.manifest)
+        self.assertNotEqual(first["links"][0]["sha256"], second["links"][0]["sha256"])
 
     def test_timeout_baseline_has_no_fabricated_median_or_speedup(self):
         model, _, _ = review_data.load(self.manifest)
@@ -200,11 +225,11 @@ class ReportExtensionsTests(unittest.TestCase):
         data = json.loads((self.out / "review-data.json").read_text())
         record = data["comparisons"][0]
         self.assertEqual(record["samples_sha256"], hashlib.sha256(before).hexdigest())
-        archived = paired(observations(archived_raw, ["control", "candidate"]), "control", "candidate")
+        archived = paired_rows(observations(archived_raw, ["control", "candidate"]), "control", "candidate")
         for key in ("control", "candidate", "paired_saving_s"):
             self.assertEqual(record["statistics"][key], archived[key])
         self.assertEqual(record["statistics"]["control"]["median"], 11)
-        changed = paired(observations(source.read_bytes(), ["control", "candidate"]), "control", "candidate")
+        changed = paired_rows(observations(source.read_bytes(), ["control", "candidate"]), "control", "candidate")
         self.assertEqual(changed["control"]["median"], 100)
 
     @unittest.skipUnless(importlib.util.find_spec("matplotlib"), "optional Matplotlib not installed")

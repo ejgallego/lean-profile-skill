@@ -6,9 +6,9 @@ import sys
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-from review_observations import observations, paired, series, stats, reduction
+from review_observations import observations, series, stats, reduction
 from review_format import duration, number, time_unit
-from review_helpers import csv_bytes, jsonl, sample
+from review_helpers import csv_bytes, jsonl, sample, paired_rows
 
 
 class ObservationTests(unittest.TestCase):
@@ -20,14 +20,14 @@ class ObservationTests(unittest.TestCase):
         return observations(jsonl(self.rows if rows is None else rows), configurations, format="jsonl")
 
     def test_blocks_not_row_order(self):
-        result = paired(self.parse(), "control", "candidate")
+        result = paired_rows(self.parse(), "control", "candidate")
         self.assertEqual(result["control"], dict(n=2, median=15, q1=12.5, q3=17.5, iqr=5, min=10, max=20))
         self.assertEqual(result["savings"], [-1, 11])
         self.assertEqual(result["candidate_faster"], 1)
 
     def test_csv_and_jsonl_share_numerical_model(self):
         csv = observations(csv_bytes(self.rows), ["control", "candidate"])
-        a, b = paired(csv, "control", "candidate"), paired(self.parse(), "control", "candidate")
+        a, b = paired_rows(csv, "control", "candidate"), paired_rows(self.parse(), "control", "candidate")
         for key in ("control", "candidate", "paired_saving_s", "pair_ids"):
             self.assertEqual(a[key], b[key])
 
@@ -37,8 +37,8 @@ class ObservationTests(unittest.TestCase):
             for slot, name in enumerate(order, 1):
                 rows.append(sample(name, block, {"a": 10, "b": 8, "c": 7}[name] + block, slot=slot))
         groups = self.parse(rows, ["a", "b", "c"])
-        self.assertEqual(paired(groups, "a", "b")["savings"], [2] * 6)
-        self.assertEqual(paired(groups, "b", "c")["savings"], [1] * 6)
+        self.assertEqual(paired_rows(groups, "a", "b")["savings"], [2] * 6)
+        self.assertEqual(paired_rows(groups, "b", "c")["savings"], [1] * 6)
         self.assertEqual([r["slot"] for r in groups["a"]], [1, 1, 2, 3, 2, 3])
 
     def test_jsonl_preserves_nested_values_and_integer_clock_reading(self):
@@ -50,6 +50,13 @@ class ObservationTests(unittest.TestCase):
         self.assertEqual(result["argv"], row["argv"])
         self.assertEqual(result["validation"], row["validation"])
 
+    def test_jsonl_errors_identify_source_and_physical_line(self):
+        prefix = jsonl([self.rows[0]]) + b"\n\n"
+        for invalid in (b"{broken json}", b'{"id":1,"id":2}', b'{"extra":NaN}'):
+            with self.subTest(invalid=invalid):
+                with self.assertRaisesRegex(ValueError, r"capture\.jsonl:4:"):
+                    observations(prefix + invalid, ["control"], "capture.jsonl", format="jsonl")
+
     def test_warmup_timeout_is_not_a_measured_baseline(self):
         timeout = sample("control", 0, phase="warmup", outcome="timeout", timeout_s=60,
                          elapsed_ns=60_020_000_000, exit_status=None, included=False,
@@ -60,12 +67,12 @@ class ObservationTests(unittest.TestCase):
         self.assertFalse(values["censored"])
         self.assertEqual(values["outcomes"][0]["phase"], "warmup")
         self.assertEqual(values["outcomes"][0]["timeout_s"], 60)
-        self.assertIsNone(paired(groups, "control", "candidate")["paired_saving_s"])
+        self.assertIsNone(paired_rows(groups, "control", "candidate")["paired_saving_s"])
 
     def test_mixed_censoring_keeps_outcomes_without_survivor_speedup(self):
         timeout = sample("control", 3, outcome="timeout", timeout_s=60, wall_s=60.02,
                          exit_status=None, included=False, validated=False, exclude_reason="timeout")
-        result = paired(self.parse(self.rows + [timeout]), "control", "candidate")
+        result = paired_rows(self.parse(self.rows + [timeout]), "control", "candidate")
         self.assertTrue(result["series"]["control"]["censored"])
         self.assertEqual(result["control"]["n"], 2)
         self.assertIsNone(result["paired_saving_s"])
@@ -74,18 +81,18 @@ class ObservationTests(unittest.TestCase):
     def test_failed_third_configuration_does_not_change_other_contrast(self):
         rows = self.rows + [sample("third", 1, outcome="timeout", timeout_s=3,
                                    exit_status=None, included=False, validated=False, exclude_reason="timeout")]
-        result = paired(self.parse(rows, ["control", "candidate", "third"]), "control", "candidate")
+        result = paired_rows(self.parse(rows, ["control", "candidate", "third"]), "control", "candidate")
         self.assertEqual(result["paired_saving_s"]["median"], 5)
 
     def test_unmatched_members_are_visible_not_silently_paired(self):
-        result = paired(self.parse(self.rows[:-1]), "control", "candidate")
+        result = paired_rows(self.parse(self.rows[:-1]), "control", "candidate")
         self.assertIsNone(result["paired_saving_s"])
         self.assertEqual(result["unmatched_blocks"], dict(control=["1"], candidate=[]))
 
     def test_explicit_exclusion_of_both_members_restores_pairing(self):
         rows = [r | dict(included=False, exclude_reason="declared pair exclusion")
                 if r["block"] == "1" else r for r in self.rows]
-        result = paired(self.parse(rows), "control", "candidate")
+        result = paired_rows(self.parse(rows), "control", "candidate")
         self.assertEqual(result["pair_ids"], ["2"])
         self.assertEqual(len(result["excluded"]), 2)
 

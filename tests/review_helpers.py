@@ -4,6 +4,13 @@ import csv
 import io
 import json
 
+from review_observations import paired, series
+
+
+def paired_rows(groups, control, candidate):
+    """Convenience for tests starting with parsed rows, not dataset series."""
+    return paired({name: series(rows) for name, rows in groups.items()}, control, candidate)
+
 
 def sample(configuration, block, wall_s=1, **overrides):
     row = dict(configuration=configuration, block=str(block), phase="measured",

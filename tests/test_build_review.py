@@ -2,8 +2,10 @@
 
 import hashlib
 import json
+import os
 from pathlib import Path
 import sys
+import subprocess
 import tempfile
 import unittest
 
@@ -66,6 +68,20 @@ class ReviewTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             review.build(self.manifest, self.out)
         self.assertFalse(self.out.exists())
+
+    def test_cli_without_site_packages_builds_plain_and_rejects_optional_plots(self):
+        # Exclude site-packages even in the CI job that installs Matplotlib.
+        # Keep the script directory importable, but remove PYTHONPATH injection.
+        command = [sys.executable, "-S", "-B", str(SKILL / "scripts/build_review.py"),
+                   str(self.manifest), "--out", str(self.out)]
+        environment = {key: value for key, value in os.environ.items() if key != "PYTHONPATH"}
+        result = subprocess.run(command + ["--plots"], env=environment, capture_output=True, text=True, timeout=30)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("--plots requires Matplotlib", result.stderr)
+        self.assertFalse(self.out.exists())
+        result = subprocess.run(command, env=environment, capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((self.out / "index.html").is_file())
 
     def test_symlink_urls_remain_under_server_mount(self):
         (self.root / "mounted").symlink_to(self.root, target_is_directory=True)

@@ -13,6 +13,7 @@ from unittest import mock
 SKILL = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SKILL / "scripts"))
 import import_comparison as importer
+import review_data
 from build_review import build
 from review_data import load
 from review_helpers import jsonl
@@ -93,6 +94,63 @@ class ImportTests(unittest.TestCase):
         self.assertEqual(validation.read_bytes(), (self.out / "source-validation.json").read_bytes())
         with self.assertRaises(FileExistsError):
             self.run_import(validation)
+
+    def test_shared_validation_artifact_is_hashed_and_linked_once_per_invocation(self):
+        validation, _ = self.validation()
+        evidence = self.root / "validation-results.json"
+        with mock.patch.object(importer, "digest", wraps=importer.digest) as hashes:
+            path = self.run_import(validation)
+        self.assertEqual([call.args[0] for call in hashes.call_args_list], [evidence])
+        with mock.patch.object(review_data, "digest", wraps=review_data.digest) as hashes:
+            model, _, _ = load(path)
+        self.assertEqual(sum(call.args[0] == evidence for call in hashes.call_args_list), 1)
+        self.assertEqual(sum(link["artifact_path"] == str(evidence) for link in model["links"]), 1)
+        records = [b["series"]["observations"][0]["validation"] for b in model["baselines"]]
+        self.assertEqual([v["record"] for v in records], ["/checks/0", "/checks/1"])
+        self.assertEqual([v["artifacts"][0]["record"] for v in records], ["/1", "/2"])
+        # Caches must not survive an invocation or hide a changed artifact.
+        evidence.write_text("changed")
+        self.out = self.root / "second-import"
+        with self.assertRaises(ValueError):
+            self.run_import(validation)
+        self.assertFalse(self.out.exists())
+
+    def test_repeated_artifact_with_conflicting_hash_is_rejected(self):
+        validation, spec = self.validation()
+        spec["checks"][1]["artifacts"][0]["sha256"] = "0" * 64
+        validation.write_text(json.dumps(spec))
+        with self.assertRaises(ValueError):
+            self.run_import(validation)
+        self.assertFalse(self.out.exists())
+
+    def test_abnormal_measured_outcomes_remain_excluded_with_passed_output_checks(self):
+        original = copy.deepcopy(self.rows)
+        for outcome, change in (
+            ("interrupted", dict(interrupted=True, exit_code=None)),
+            ("error", dict(launch_error="OSError: cannot launch", exit_code=None)),
+            ("timeout", dict(timed_out=True, exit_code=None, elapsed_ns=60_020_000_000)),
+        ):
+            with self.subTest(outcome=outcome):
+                self.rows = copy.deepcopy(original)
+                self.rows[0].update(change)
+                self.save()
+                validation, _ = self.validation()
+                self.out = self.root / outcome
+                model, _, _ = load(self.run_import(validation))
+                result = model["comparisons"][0]["statistics"]
+                row = result["series"]["control"]["outcomes"][0]
+                self.assertEqual(row["outcome"], outcome)
+                self.assertFalse(row["included"])
+                self.assertTrue(row["validated"])
+                self.assertIsNone(result["paired_saving_s"])
+                self.assertEqual(result["series"]["control"]["censored"], outcome == "timeout")
+
+    def test_malformed_jsonl_identifies_capture_and_line_before_output(self):
+        path = self.capture / "runs.jsonl"
+        path.write_bytes(jsonl(self.rows) + b"\n{broken json}\n")
+        with self.assertRaisesRegex(ValueError, r"runs\.jsonl:4:"):
+            self.run_import()
+        self.assertFalse(self.out.exists())
 
     def test_snapshot_survives_source_mutation(self):
         validation, _ = self.validation()
@@ -218,6 +276,30 @@ class ImportTests(unittest.TestCase):
         model, _, _ = load(self.run_import())
         self.assertEqual(len(model["baselines"][0]["series"]["outcomes"]), 2)
         self.assertEqual(model["baselines"][0]["series"]["statistics"], {})
+
+        # Establish actual correctness evidence before exercising the included path.
+        self.rows = [json.loads(line) for line in (capture / "runs.jsonl").read_text().splitlines()]
+        for row in self.rows:
+            self.assertEqual((capture / row["stdout"]).read_bytes(), b"synthetic output\n")
+        validation, spec = self.validation()
+        for check, row in zip(spec["checks"], self.rows):
+            stdout = capture / row["stdout"]
+            check.update(scope="Captured stdout equals the expected synthetic output",
+                         artifacts=[dict(path=str(stdout), sha256=hashlib.sha256(stdout.read_bytes()).hexdigest(),
+                                         record="Entire stdout; checked against b'synthetic output\\n'")])
+        validation.write_text(json.dumps(spec))
+        self.out = self.root / "validated-import"
+        manifest = self.run_import(validation)
+        report_dir = self.root / "validated-report"
+        page = build(manifest, report_dir)
+        model = json.loads((report_dir / "review-data.json").read_text())
+        normalized = (self.out / "observations.jsonl").read_bytes()
+        self.assertEqual((report_dir / "dataset-00.jsonl").read_bytes(), normalized)
+        self.assertEqual(model["datasets"][0]["samples_sha256"], hashlib.sha256(normalized).hexdigest())
+        comparison = model["comparisons"][0]["statistics"]
+        self.assertEqual(comparison["paired_saving_s"]["n"], 2)
+        self.assertEqual(set(comparison["pair_ids"]), {"1", "2"})
+        self.assertIn('href="dataset-00.jsonl"', page.read_text())
 
 
 if __name__ == "__main__":

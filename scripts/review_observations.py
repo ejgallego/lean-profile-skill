@@ -50,6 +50,24 @@ def stats(values):
     return result
 
 
+def jsonl_rows(raw, source):
+    """Parse a JSONL snapshot with physical file locations, including blank lines."""
+    try:
+        content = raw.decode("utf-8-sig")
+    except UnicodeDecodeError as error:
+        raise ValueError(f"{source}: invalid UTF-8: {error}") from error
+    for line, value in enumerate(content.split("\n"), 1):
+        if not value.strip():
+            continue
+        try:
+            row = json_value(value)
+        except json.JSONDecodeError as error:
+            raise ValueError(f"{source}:{line}:{error.colno}: {error.msg}") from error
+        except ValueError as error:
+            raise ValueError(f"{source}:{line}: {error}") from error
+        yield line, row
+
+
 def reduction(before, after):
     result = 100 * (1 - after / before)
     if not math.isfinite(result):
@@ -79,9 +97,7 @@ def observations(raw, configurations, source="observations", *, format="csv",
             raise ValueError(f"{source}: require unique columns including {sorted(required)}")
         inputs = list(enumerate(reader, 2))
     elif format == "jsonl":
-        inputs = [(line, json_value(value))
-                  for line, value in enumerate(raw.decode("utf-8-sig").splitlines(), 1)
-                  if value.strip()]
+        inputs = list(jsonl_rows(raw, source))
     else:
         raise ValueError("Observation format must be csv or jsonl")
     if not inputs:
@@ -223,10 +239,11 @@ def series(rows):
     )
 
 
-def paired(groups, control, candidate):
+def paired(series_by_config, control, candidate):
+    """Contrast precomputed configuration series; do not resummarize captures."""
     if control == candidate:
         raise ValueError("Control and candidate must differ")
-    before, after = series(groups[control]), series(groups[candidate])
+    before, after = series_by_config[control], series_by_config[candidate]
     a = {r["block"]: r["wall_s"] for r in before["observations"]}
     b = {r["block"]: r["wall_s"] for r in after["observations"]}
     reason = ""
