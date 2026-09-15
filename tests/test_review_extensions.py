@@ -150,7 +150,7 @@ class ReportExtensionsTests(unittest.TestCase):
                 self.spec["datasets"][1][key] = original
 
     def test_ids_do_not_capture_ui_controls_or_each_other(self):
-        for invalid in ("original", "datasets", "decision-filter", "frame-viewer", "<script>"):
+        for invalid in ("original", "datasets", "decision-filter", "frame-viewer", "group-experiment", "<script>"):
             with self.subTest(invalid=invalid):
                 self.spec["comparisons"][0]["id"] = invalid
                 self.write()

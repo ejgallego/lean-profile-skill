@@ -50,6 +50,10 @@ are pooled and no group estimate is calculated. With plots enabled, the first
 member's distribution is shown with the group; every other distribution remains
 under that workload's expandable evidence. Put the representative workload first.
 Missing estimates, censoring and measured exclusions remain visible in the table.
+Control and candidate use the same time unit within each workload row; paired
+savings may use a finer unit. The experiment index targets the shared explanation,
+while individual comparison links target their workload rows. Text search includes
+each workload's expandable evidence without matching unrelated group members.
 
 Baselines and comparisons reference a dataset; they cannot override its metadata.
 Each dataset is parsed, hashed and copied once, regardless of the number of
@@ -88,7 +92,7 @@ An optional `id` gives a stable anchor for each baseline, comparison or profile.
 Dataset IDs are mandatory. IDs must start with an ASCII letter and contain
 only letters, digits, `_` or `-`. They must be globally unique. The UI reserves
 `baselines`, `datasets`, `progress`, `attribution`, `measurements`, `evidence`,
-`filter`, `decision-filter`, `count`, `toast`, and the `frame-` prefix.
+`filter`, `decision-filter`, `count`, `toast`, and the `frame-` and `group-` prefixes.
 Default baseline/comparison/profile IDs are `base-00`, `cmp-00` or `profile-00`
 in array order; use explicit IDs for cross-references.
 

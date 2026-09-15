@@ -12,9 +12,11 @@ SKILL=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(SKILL/'scripts'))
 import build_review
 import review_data
+import review_html
 
 
 class Page(HTMLParser):
+    """Approximate HTML disclosure visibility only, not CSS or browser layout."""
     def __init__(self, raw):
         super().__init__()
         self.stack=[]
@@ -32,7 +34,13 @@ class Page(HTMLParser):
                 del self.stack[i:]
                 break
     def handle_data(self,data):
-        self.text.append((data,any(tag=='details' for tag,_ in self.stack)))
+        hidden = any('hidden' in attrs for _, attrs in self.stack)
+        for i, (tag, attrs) in enumerate(self.stack):
+            if tag == 'details' and 'open' not in attrs:
+                # Only a direct summary child escapes this closed disclosure.
+                if i + 1 == len(self.stack) or self.stack[i + 1][0] != 'summary':
+                    hidden = True
+        self.text.append((data, hidden))
     @property
     def visible(self):
         return ''.join(text for text,collapsed in self.text if not collapsed)
@@ -95,7 +103,49 @@ class PresentationTests(unittest.TestCase):
         page=Page(build_review.build(self.path,self.root/'out').read_text())
         self.assertLess(page.ids.index('baselines'),page.ids.index('progress'))
         self.assertGreater(page.ids.index('datasets'),page.ids.index('evidence'))
-        self.assertNotIn('Multi-configuration overview',page.visible)
+        self.assertIn('Multi-configuration overview',page.visible)
+        raw = build_review.build(self.path, self.root/'other').read_text()
+        overview = raw.split('<details id="datasets">', 1)[1].split('</section>', 1)[0]
+        self.assertIn('<table>', overview)
+        self.assertEqual(Page('<details>' + overview + '</details>').visible,
+                         'Multi-configuration overview')
+
+    def test_disclosure_visibility_includes_summaries_and_open_contents(self):
+        page = Page('<details><summary>Visible <b>label</b></summary>Hidden body'
+                    '<details open><summary>Hidden nested label</summary>Hidden nested body</details>'
+                    '</details><details open><summary>Open label</summary>Open body'
+                    '<details><summary>Nested label</summary>Hidden inner body</details>'
+                    '</details><div hidden>Hidden attribute</div>')
+        self.assertEqual(page.visible, 'Visible labelOpen labelOpen bodyNested label')
+
+    def test_experiment_index_targets_group_explanation_and_preserves_row_anchor(self):
+        self.group()
+        self.write()
+        model, _, _ = review_data.load(self.path)
+        items = model['comparisons']
+        first = items[0]
+        raw = review_html.render_group(items[:2], [], self.root, False)
+        self.assertIn(f'id="group-{first["id"]}"><h3>', raw)
+        self.assertIn(first['id'], Page(raw).ids)
+        # Four index entries are needed; their labels do not determine IDs.
+        index = review_html.comparison_index(items + [dict(items[-1], id='extra')])
+        self.assertIn(f'href="#group-{first["id"]}"', index)
+        self.assertNotIn(f'href="#{first["id"]}"', index)
+
+    def test_grouped_control_and_candidate_share_units_across_boundary(self):
+        self.group()
+        self.write()
+        model, _, _ = review_data.load(self.path)
+        item = model['comparisons'][0]
+        def stats(lo, hi):
+            return dict(n=2, min=lo, max=hi, median=(lo + hi)/2, iqr=(hi - lo)/2)
+        item['statistics'].update(control=stats(1.001, 1.002),
+                                  candidate=stats(.998, .999),
+                                  paired_saving_s=stats(.002, .004))
+        raw = review_html.render_group([item], [], self.root, False)
+        self.assertIn('<strong>1.002 s</strong>', raw)
+        self.assertIn('<strong>0.9985 s</strong>', raw)
+        self.assertIn('<strong>3 ms</strong>', raw)
 
 
 if __name__=='__main__':unittest.main()

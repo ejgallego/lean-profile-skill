@@ -326,10 +326,10 @@ def comparison_title(item):
     return item['group'] + ' — ' + item['title'] if 'group' in item else item['title']
 
 
-def compact_distribution(stats):
+def compact_distribution(stats, display_unit=None):
     if stats is None:
         return 'Not estimated'
-    scale, unit = time_unit([stats['min'], stats['max']])
+    scale, unit = display_unit or time_unit([stats['min'], stats['max']])
     return (f'<strong>{number(stats["median"], scale)} {unit}</strong> [{number(stats["iqr"], scale)}]'
             + f'<small>{number(stats["min"], scale)}–{number(stats["max"], scale)} {unit}; n={stats["n"]}</small>')
 
@@ -342,6 +342,10 @@ def render_group(items, profiles, out, plots):
     for index, item in enumerate(items):
         s = item['statistics']
         saving = s['paired_saving_s']
+        display_unit = time_unit(
+            s[side][bound] for side in ('control', 'candidate')
+            if s[side] is not None for bound in ('min', 'max')
+        )
         label = E(item['title']) + f'<small>{E(item["boundary"])}</small>'
         for side in ('control', 'candidate'):
             warning = availability(s['series'][side])
@@ -349,8 +353,8 @@ def render_group(items, profiles, out, plots):
                 label += f'<small class="availability">{E(item[side])}: {E(warning)}</small>'
         rows.append([
             label,
-            compact_distribution(s['control']) + f'<small>{E(item["control"])}</small>',
-            compact_distribution(s['candidate']) + f'<small>{E(item["candidate"])}</small>',
+            compact_distribution(s['control'], display_unit) + f'<small>{E(item["control"])}</small>',
+            compact_distribution(s['candidate'], display_unit) + f'<small>{E(item["candidate"])}</small>',
             f'{s["median_reduction_pct"]:+.3g}%' if saving else 'Not estimated',
             compact_distribution(saving) if saving else E(s['unavailable_reason']),
             f'{s["candidate_faster"]}/{saving["n"]}' if saving else '—',
@@ -370,7 +374,7 @@ def render_group(items, profiles, out, plots):
                         + evidence_details(item, detail, item['title'] + ' — distributions and evidence') + '</div>')
         evidence.extend(f'<div class="comparison-evidence" data-for="{item["id"]}">' + profile(p,out) + '</div>'
                         for p in profiles if p.get('comparison') == item['id'])
-    content = ('<article class="comparison-group"><h3>' + E(first['group']) + '</h3>' + paragraphs(first['note'])
+    content = (f'<article class="comparison-group" id="group-{first["id"]}"><h3>' + E(first['group']) + '</h3>' + paragraphs(first['note'])
                + table(['Workload', 'Control: median [IQR]', 'Candidate: median [IQR]',
                         'Median reduction', 'Paired saving: median [IQR]', 'Faster pairs'], rows, attrs)
                + paragraphs(first['decision']))
@@ -399,7 +403,8 @@ def comparison_index(items):
         key = ('group', item['group']) if 'group' in item else ('comparison', item['id'])
         if key not in seen:
             seen.add(key)
-            links.append(f'<li><a href="#{item["id"]}">{E(item.get("group", item["title"]))}</a></li>')
+            anchor = f'group-{item["id"]}' if 'group' in item else item['id']
+            links.append(f'<li><a href="#{anchor}">{E(item.get("group", item["title"]))}</a></li>')
     if len(links) < 4:
         return ''
     return '<nav class="experiment-index" aria-label="Experiment index"><ol>' + ''.join(links) + '</ol></nav>'

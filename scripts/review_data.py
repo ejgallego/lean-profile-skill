@@ -63,7 +63,7 @@ def load(manifest_path):
         value = item.get("id", default)
         if (not isinstance(value, str)
                 or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]*", value)
-                or value in ids or value.startswith("frame-")):
+                or value in ids or value.startswith(("frame-", "group-"))):
             raise ValueError(f"Invalid or duplicate ID: {value}")
         ids.add(value)
         return value

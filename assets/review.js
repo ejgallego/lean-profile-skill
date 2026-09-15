@@ -5,10 +5,16 @@ function filter() {
   if (!$("filter")) return;
   const q = $("filter").value.toLowerCase();
   const decision = $("decision-filter")?.value || "all";
+  const evidence = new Map();
+  for (const detail of document.querySelectorAll(".comparison-evidence")) {
+    const id = detail.dataset.for;
+    evidence.set(id, (evidence.get(id) || "") + " " + detail.textContent);
+  }
   let count = 0;
   for (const card of document.querySelectorAll(".comparison")) {
     card.hidden =
-      !(card.textContent + " " + (card.dataset.context || "")).toLowerCase().includes(q) ||
+      !(card.textContent + " " + (card.dataset.context || "") + " " +
+        (evidence.get(card.id) || "")).toLowerCase().includes(q) ||
       (decision !== "all" && card.dataset.decision !== decision);
     if (!card.hidden) count++;
   }

@@ -58,7 +58,9 @@ test("group filters keep workload rows, their evidence and summary navigation to
   const b = { textContent: "No change", dataset: { decision: "accepted", context: "Cache layer" } };
   const c = { textContent: "Edit", dataset: { decision: "rejected", context: "Native layer" } };
   const groups = [[a, b], [c]].map(rows => ({ querySelectorAll: () => rows }));
-  const details = ["a", "b", "c"].map(id => ({ dataset: { for: id } }));
+  for (const [id, card] of Object.entries({ a, b, c })) card.id = id;
+  const details = ["a", "b", "c"].map(id => ({ dataset: { for: id }, textContent: `command-${id}` }));
+  details.push({ dataset: { for: "a" }, textContent: "profile-only-token" });
   const elements = { a, b, c, count: {}, filter: { value: "" }, "decision-filter": { value: "all" } };
   for (const id of ["filter", "decision-filter"])
     elements[id].addEventListener = (event, fn) => { handlers[id] = fn; };
@@ -77,7 +79,14 @@ test("group filters keep workload rows, their evidence and summary navigation to
   handlers.filter();
   assert.deepEqual([a.hidden,b.hidden,c.hidden], [true,false,true]);
   assert.deepEqual(groups.map(g => g.hidden), [false,true]);
-  assert.deepEqual(details.map(d => d.hidden), [true,false,true]);
+  assert.deepEqual(details.map(d => d.hidden), [true,false,true,true]);
+  for (const token of ["COMMAND-a", "profile-only-token"]) {
+    elements.filter.value = token;
+    handlers.filter();
+    assert.deepEqual([a.hidden,b.hidden,c.hidden], [false,true,true]);
+    assert.deepEqual(details.map(d => d.hidden), [false,true,true,false]);
+    assert.equal(elements.count.textContent, "1 comparisons");
+  }
   elements["decision-filter"].value = "rejected";
   handlers["decision-filter"]();
   assert.equal(elements.count.textContent, "0 comparisons");
