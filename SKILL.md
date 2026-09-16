@@ -1,6 +1,6 @@
 ---
 name: lean-profile-skill
-description: Investigate Lean performance with separate workflows for public build/edit-to-output latency, module elaboration, and compiled native runtime. Use for measured experiments, Lean or Lake phase attribution, perf/samply and generated-C analysis, or reusable evidence reports. Start build and elaboration investigations with Lake and Lean frontend evidence; use native sampling after locating a substantial native runtime cost.
+description: Investigate Lean performance across public build/edit-to-output latency, module elaboration, native runtime, and browser/Wasm widgets. Use for measured experiments, Lean or Lake phase attribution, perf/samply and generated-C analysis, browser sampled attribution, or reusable evidence reports. Start build investigations with Lake and Lean frontend evidence; choose runtime profiling for the actual execution backend.
 ---
 
 # Lean Performance Profiling
@@ -18,6 +18,9 @@ credible attribution, and an optimization case that can be safely landed.
 - For compiled executable runtime and generated native code, use the native
   workflow below. Enter it from a build investigation when native execution is
   a substantial part of the public wall time.
+- For Lean-backed browser widgets, Wasm or VIR/FIR comparisons, read
+  [browser-wasm.md](references/browser-wasm.md). Reuse the project's browser
+  harness; distinguish decode, component work, DOM observation and paint.
 - For a technical report, timelines or a profile gallery, read
   [profile-review.md](references/profile-review.md). The bundled builder consumes
   explicitly included raw observations and linked captures; it runs no benchmarks.

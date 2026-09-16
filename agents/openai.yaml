@@ -1,4 +1,4 @@
 interface:
   display_name: "Lean Performance Profiling"
-  short_description: "Profile Lean builds, elaboration and native runtime"
+  short_description: "Profile Lean builds, elaboration, native and browser runtime"
   default_prompt: "Use $lean-profile-skill to locate the cost in this Lean workload, measure its public boundary, compare a candidate with its control, and report the evidence."

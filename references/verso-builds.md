@@ -33,6 +33,8 @@ Jobs can overlap, hooks can run before publication, and some operations occur
 inside initialization or argument evaluation. Record first usable view, complete
 HTML publication and command exit separately if they differ. Browser reload,
 asset fetching and paint require separate observations.
+For interactive Lean-backed previews, use [browser-wasm.md](browser-wasm.md)
+to separate browser decode/render work from the build and transport boundaries.
 
 Identify and record:
 

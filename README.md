@@ -1,8 +1,8 @@
 # Lean Profile Skill
 
-A Codex skill for investigating Lean build latency, module elaboration and
-compiled native runtime. See [SKILL.md](SKILL.md) for the workflow and reference
-routing.
+A Codex skill for investigating Lean build latency, module elaboration, native
+runtime and browser/Wasm widgets. See [SKILL.md](SKILL.md) for the workflow and
+reference routing.
 
 The skill includes a static evidence-report builder. It computes baseline and
 paired-comparison statistics from explicitly included CSV or JSONL observations,
@@ -36,8 +36,8 @@ current [input contract](references/review-format.md) when preparing a manifest.
 ## Repository layout
 
 - `SKILL.md` and `agents/openai.yaml`: workflow routing and skill metadata.
-- `references/`: public-build, elaboration, Verso and native-runtime guidance,
-  plus the report guide and input contract.
+- `references/`: public-build, elaboration, Verso, native-runtime and browser/Wasm
+  guidance, plus the report guide and input contract.
 - `scripts/`: command comparison harness, retained-capture importer, shared
   observation model, report builder, and optional plots. Importing and reporting
   consume evidence without running benchmarks.
