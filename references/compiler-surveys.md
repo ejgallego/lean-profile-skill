@@ -26,19 +26,23 @@ and non-source input identities.
 
 ## Stage the survey
 
-1. Collect diagnostics-off whole-build wall, CPU, peak-memory, job timing and
-   dependency information with output checks. Keep per-module phase data before
-   aggregation; an aggregate category without a module key cannot select files.
-2. Construct separate views for absolute compilation work, dependency
+1. Collect a diagnostics-off whole-build census of wall, CPU, peak memory, job
+   timing and dependency information with output checks. Use this plain capture
+   for cost and critical-path views.
+2. In a separately labeled diagnostic capture, collect module-keyed Lean
+   `--profile` phase data and retain it before aggregation. An aggregate category
+   without a module key cannot select files, and instrumented phase durations
+   are not plain build timings.
+3. Construct separate views for absolute compilation work, dependency
    critical-path contribution and unusual phase behavior. Do not add parallel
    module durations and call the sum wall time.
-3. If a whole-build native sample could reveal callers spread across many short
+4. If a whole-build native sample could reveal callers spread across many short
    modules, pilot it separately. Verify descendant coverage, overhead, output
    size, sample loss, symbols and unwind quality before choosing the rate. Keep
    this diagnostic capture out of headline timing samples.
-4. Replay selected modules in isolation with the exact command and output gate.
+5. Replay selected modules in isolation with the exact command and output gate.
    Parallel-build observations motivate the replay; they do not replace it.
-5. Use detailed caller profiles to form hypotheses, then reconnect any focused
+6. Use detailed caller profiles to form hypotheses, then reconnect any focused
    experiment to a representative build or module workload.
 
 Retain failed and lossy pilot captures with their rejection reason. Sampling
@@ -105,8 +109,11 @@ Add these fields to the project-local survey manifest or adapter:
 - exact argv, working directory, concurrency, process/descendant policy,
   module-to-process mapping, monotonic job/module start and end times, exit
   status and output gate;
-- per-module wall/user/system time, peak RSS, phase timings, requested artifact
+- diagnostics-off per-module wall/user/system time, peak RSS, requested-artifact
   status, dependency predecessors and critical-path contribution;
+- separately labeled, module-keyed Lean `--profile` records, exact profiler
+  options and raw phase entries before aggregation; do not treat their
+  instrumented durations as diagnostics-off costs;
 - profiler/backend version, command, event, requested and observed frequency,
   call-graph mode, target PIDs/TIDs, sample counts, losses, unknown/known-frame
   share, symbol/unwind checks and measured pilot overhead;
@@ -121,4 +128,3 @@ CPU samples, inclusive scope durations, worker overlap, waits and wall latency
 answer different questions. Keep them separate. A helper becoming a larger
 percentage after a fix does not show that its absolute cost increased, and
 waiter frames alone do not establish synchronization as a wall-time regression.
-
