@@ -123,3 +123,7 @@ Keep version-specific classifiers, clock probes and browser adapters in the
 project. Reports should link raw profiles and calibration/symbol evidence using
 [profile-review.md](profile-review.md), with uninstrumented acceptance results
 and attribution captures clearly separated.
+
+`lake samply` profiles a native Lake executable target. It does not replace CDP
+sampling, browser performance traces or clock calibration for Wasm running in a
+browser, even when the Wasm was produced from the same Lean source.

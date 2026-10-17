@@ -5,6 +5,7 @@ Use this reference for the concrete mechanics of profiling Lean executables.
 ## Contents
 
 - Backend Preflight
+- Lake Samply
 - Measurement Loop
 - Order-Balanced Comparison
 - Phase Mapping
@@ -33,16 +34,61 @@ discovery, variables, and redirection when working on Windows even though
    If the probe reports a permission or unsupported-event error, preserve the
    exact diagnostic. Do not silently replace attribution with elapsed timings.
 
-2. On Linux, macOS, or Windows, use `samply` when it is installed and can record
-   the target:
+2. For a Lake executable target, feature-detect Lake's integrated `samply`
+   command. It is not present in older toolchains:
+
+   ```bash
+   lake --help | rg '^[[:space:]]+samply[[:space:]]'
+   lake help samply
+   ```
+
+   Prefer it when available because it builds the selected target in the Lake
+   environment, symbolicates addresses and demangles Lean-generated names.
+
+3. On Linux, macOS, or Windows, use standalone `samply` when it is installed and
+   can record the target. This remains the fallback for older Lake versions,
+   arbitrary binaries and wrappers that are not Lake executable targets:
 
    ```bash
    command -v samply
    ```
 
-3. If neither backend works, report the blocker and the attempted commands.
+4. If no applicable backend works, report the blocker and the attempted commands.
    Continue with workload definition and identity capture, but do not make a
    hotspot claim from timing alone.
+
+## Lake Samply
+
+For a supported pinned toolchain and a `lean_exe` target, use a fresh output
+path and `--no-serve` for unattended capture:
+
+```bash
+profile_run_dir="_profiles/baseline-001"
+test ! -e "$profile_run_dir"
+mkdir -p "$profile_run_dir"
+
+lake samply --no-serve \
+  -o "$profile_run_dir/profile-demangled.json.gz" \
+  <exe-target> -- --rate 997 -- <exe-args>
+```
+
+The first `--` begins arguments forwarded to `samply record`; the second begins
+the executable's arguments. Omit `--rate 997` or replace it with other supported
+`samply record` flags when appropriate. `--no-serve` still performs symbolication
+and Lean-name demangling, writes the profile and exits. `--raw` instead preserves
+the raw profile without those post-processing steps. Use interactive serving
+only when the user wants to inspect the profile immediately.
+
+Record `lake --version`, `samply --version`, the exact target and arguments, the
+profile hash, and the final executable hash. `lake samply` builds the target, so
+confirm which binary it produced and whether the build changed it before using
+the profile to explain separately measured timings. The capture is diagnostic:
+do not use its elapsed duration as the headline acceptance measurement.
+
+`lake samply` targets native executables. It does not replace Lean frontend
+`trace.profiler`, browser/Wasm CDP capture, `perf stat`, or profiling an enclosing
+public wrapper. For an arbitrary already-built command, retain the standalone
+`samply record --save-only` workflow below.
 
 ## Measurement Loop
 
@@ -151,7 +197,8 @@ flamegraph.pl --title "Lean profile" "$profile_run_dir/perf.folded" \
   > "$profile_run_dir/profile.svg"
 ```
 
-If FlameGraph scripts are not installed, use `samply`:
+If `lake samply` is unavailable or the target is not a Lake executable, use
+standalone `samply`:
 
 ```bash
 samply record --save-only -o "$profile_run_dir/profile.json.gz" -- \

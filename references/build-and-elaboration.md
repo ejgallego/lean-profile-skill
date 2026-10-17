@@ -21,10 +21,12 @@ command comparison. Site-generation boundaries are covered in the Verso referenc
 Before measurement, identify the edited source modules, requested Lake targets,
 dependency graph, expected artifacts, and executable entry points or external
 tools where applicable. Check Lean module-system status, `precompileModules`,
-and declared dependencies for non-Lean inputs (for example, `include_str` files
-and their Lake `needs`). Record repository/worktree identities and patches,
-toolchain and dependency revisions, manifest hash, platform/CPU/core count, and
-artifact/OS-cache policy. Keep experiments isolated from the author's checkout.
+and, when the pinned toolchain supports them, `precompileImports` and
+`precompileLibrary`. Check declared dependencies for non-Lean inputs (for
+example, `include_str` files and their Lake `needs`). Record repository/worktree
+identities and patches, toolchain and dependency revisions, manifest hash,
+platform/CPU/core count, and artifact/OS-cache policy. Keep experiments isolated
+from the author's checkout.
 
 Choose a representative edit that invalidates the same source on each run.
 Keep the scope of invalidation comparable, whether editing a proof, definition
@@ -66,10 +68,26 @@ needed and describe the achievable boundary.
 2. Separate Lake setup/planning from module jobs, C compilation, linking and
    other subprocesses actually present. If the public command also executes a
    built program, distinguish its startup, work and shutdown from the build.
+   On toolchains that expose LeanIR generation as its own Lake job, distinguish
+   `elabArts` from `irArts`. The deprecated `leanArts` facet delegates to
+   `irArts`, so it is too coarse for attributing that boundary.
 3. Profile affected Lean modules with the toolchain's supported `--profile`,
    `profiler` options or `trace.profiler`. Inspect imports, initialization,
    elaboration, interpretation, compiler transformations, linters and tactics.
    Read toolchain help/local code for exact flags instead of assuming versions.
+   A current noninteractive trace capture has this shape:
+
+   ```bash
+   lake env lean \
+     -Dtrace.profiler=true \
+     -Dtrace.profiler.output=_out/profile.json \
+     Module.lean
+   ```
+
+   Verify the flags against the pinned Lean version. `trace.profiler.serve=true`
+   is an interactive convenience and can keep the process serving the trace;
+   do not use it in an unattended timing loop. These traces describe Lean
+   frontend scopes, not native CPU samples or the full public wall-time boundary.
 4. Add coarse monotonic markers around identified phases. Preserve a common
    clock origin and event scope. Attribute expensive enclosing elaborators with
    finer markers only where useful; an enclosing elaborator may aggregate work
@@ -98,6 +116,10 @@ Workload-dependent lessons worth checking, not assuming:
 
 - Precompilation may improve warm generation while increasing clean-build cost.
   Native initialization may also activate unrelated linters and change output.
+- Where supported, test `precompileImports` and `precompileLibrary` as distinct
+  configurations rather than aliases for `precompileModules`: they move
+  different compilation work across the module/library boundary. Measure their
+  no-change, representative-edit and clean-build costs separately.
 - Moving generated timestamps out of dependency-bearing source removes unwanted
   invalidation, rather than making elaboration itself faster.
 - Manifest reuse needs a validity contract; a retained Lake workspace additionally

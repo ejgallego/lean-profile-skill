@@ -76,7 +76,9 @@ dimensions explicitly before proposing a compiler feature or native override.
      the optimization decision.
 
 4. Collect attribution with native profilers.
-   - Use `perf record`, flamegraphs, or `samply` to choose targets.
+   - For a Lake executable target, prefer `lake samply` when the pinned
+     toolchain provides it; it builds the target and demangles Lean names.
+     Otherwise use `perf record`, standalone `samply`, or the project's profiler.
    - Start with self time, then inspect children and callers.
    - Validate that samples come from the intended process or descendants, not
      only a launcher or waiting parent. A nonempty profile file is not enough.
