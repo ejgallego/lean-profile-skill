@@ -123,6 +123,11 @@ comparison script records SHA-256 identities for both executables and every
 file passed through `--artifact`; when working manually, use the platform's
 available SHA-256 tool.
 
+For a compiler or launcher that loads the implementation from shared libraries,
+also record the resolved process mappings and hash the libraries actually loaded.
+An unchanged executable stub does not establish compiler identity. Record native
+build IDs when available so profiles, symbols and mapped images can be joined.
+
 Keep the build type explicit when it matters:
 
 - `release` is the standard build for headline benchmarks;
@@ -286,6 +291,9 @@ Before acting on a sampled profile:
   addresses, impossible callers, or stacks that end in nonsense addresses;
 - compare `perf report --no-children` with call-graph views so bad unwinding
   does not hide a strong self-time target.
+- record requested and observed sampling rate, sample/event losses, target
+  thread coverage and known-versus-unknown frame share. Preserve rejected or
+  lossy captures instead of silently lowering the rate and replacing them.
 
 When call chains are poor, build a profiling binary with frame-pointer-friendly
 C flags if the project supports it:

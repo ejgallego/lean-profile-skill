@@ -7,6 +7,9 @@ a fresh workload; another project's bottlenecks are hypotheses only.
 
 For Verso projects, also read [verso-builds.md](verso-builds.md) for the
 document/generator stages, deferred blocks, highlighting and project wrappers.
+For a whole-library or compiler-build survey that selects modules and semantic
+callers for deeper profiling, also read
+[compiler-surveys.md](compiler-surveys.md).
 
 ## Establish the public boundary
 
@@ -65,6 +68,9 @@ needed and describe the achievable boundary.
 
 1. Record exactly which Lake jobs rebuild and their durations; construct the
    dependency critical path. Parallel job CPU/durations are not serial wall time.
+   In a multi-module survey, retain module keys and phase data before aggregation;
+   confirm selected modules in isolation because their build durations include
+   parallel contention.
 2. Separate Lake setup/planning from module jobs, C compilation, linking and
    other subprocesses actually present. If the public command also executes a
    built program, distinguish its startup, work and shutdown from the build.

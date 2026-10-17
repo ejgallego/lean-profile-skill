@@ -83,6 +83,12 @@ Selectors should validate benchmark metadata, warn about stale report commits,
 rank representative workloads ahead of guardrails, and emit the rerun command
 for the top row.
 
+For a whole-library compiler survey, keep absolute work, critical-path latency
+and unusual phase or caller behavior as separate selection views. Read
+[compiler-surveys.md](compiler-surveys.md) before choosing files; predeclare
+category quotas and tie-breaking, retain the full eligibility table, and replay
+selected modules in isolation.
+
 A good optimization story connects:
 
 - a representative slowdown or hotspot;
