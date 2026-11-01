@@ -140,8 +140,9 @@ reimplementation or trusted reference; then the two configurations agreeing with
 other over more inputs than the benchmark uses. A candidate compared only with its
 own retained output establishes nothing. The bundled `scripts/check_outputs.py` covers
 the common case, comparing every completed run's retained stdout with trusted bytes
-and recording mismatches as `failed`. `--scope` must say what the match establishes
-and what it omits. It handles byte-exact output only; write the validation document
+and recording mismatches as `failed`. It refuses to replace either output file; a later
+I/O failure can leave only the newly created part. `--scope` must say what the match
+establishes and what it omits. It handles byte-exact output only; write the validation document
 directly for anything that needs normalizing. It reads the retained capture and does
 not run commands, so generate the expected bytes separately.
 

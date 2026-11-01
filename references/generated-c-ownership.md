@@ -89,9 +89,11 @@ Prefer these sample-visible runtime symbols:
   array operations. Expect it in disassembly, not in generated C, and not in self
   time: on Lean 4.36 the samples land in `lean_copy_expand_array`, so its absence
   from a profile or from `.c` files rules nothing out;
-- `lean::lean_del_core_other`: freeing a large object. When a nonlinear update
-  copies an array each iteration, freeing the old copy can cost as much as making
-  the new one (a roughly 50/50 split on one measured workload);
+- `lean::lean_del_core_other`: non-constructor object destruction, dispatched by tag
+  for closures, arrays, strings, big numbers, thunks, tasks and external objects.
+  Identify the object kind and the caller. When a nonlinear update copies an array
+  each iteration, freeing the old copy can cost as much as making the new one (a
+  roughly 50/50 split on one measured workload);
 - `lean_array_push`: array growth or builder pressure;
 - `lean_dec_ref_cold`: object-release/reference-count pressure;
 - `lean_alloc_ctor`: constructor allocation;

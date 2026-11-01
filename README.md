@@ -7,23 +7,24 @@ runtime and browser/Wasm widgets, used with Claude Code and Codex. See
 ## Install
 
 Skills are directories that agents discover by location. Deploy a reviewed commit
-rather than a working tree:
+rather than a working tree, and replace the directory instead of extracting over it,
+which would leave behind files that commit removed:
 
 ```bash
-# Claude Code (any project); use .claude/skills/ in a repository to scope it there
-mkdir -p ~/.claude/skills/lean-profile-skill
-git archive HEAD | tar -x -C ~/.claude/skills/lean-profile-skill
-
-# Codex
-mkdir -p ~/.codex/skills/lean-profile-skill
-git archive HEAD | tar -x -C ~/.codex/skills/lean-profile-skill
+# ~/.claude/skills for Claude Code (or .claude/skills/ to scope it to a repository),
+# ~/.codex/skills for Codex.
+skills=~/.claude/skills
+stage=$(mktemp -d "$skills/.lean-profile-skill.XXXXXX")
+git archive HEAD | tar -x -C "$stage"
+test -f "$stage/SKILL.md"
+rm -rf -- "$skills/lean-profile-skill"
+mv "$stage" "$skills/lean-profile-skill"
 ```
 
 Claude Code loads it when a task matches the description, or directly with
-`/lean-profile-skill`. Native sampling depends on the kernel: `samply` and
-`lake samply` need `perf_event_paranoid` at 1 or lower, while `perf` also works at
-the common default of 2 with user-space events. See the
-[backend preflight](references/profiling-loop.md#backend-preflight).
+`/lean-profile-skill`. Native sampling depends on the host: `samply` and `lake samply`
+typically need `perf_event_paranoid` at 1 or lower, while `perf` often works at the
+common default of 2 with user-space events. See the [backend preflight](references/profiling-loop.md#backend-preflight).
 
 ## Reports
 

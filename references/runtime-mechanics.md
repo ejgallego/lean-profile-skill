@@ -32,7 +32,7 @@ them after changing toolchains. This stamp is not a compatibility promise.
 | Profile or generated-code signal | Likely mechanism | Next deterministic check |
 | --- | --- | --- |
 | allocator or `lean_alloc_ctor` samples | boxing, constructor creation, closure creation, or failed reuse | Inspect `lean_alloc_ctor(tag, objectFields, scalarBytes)` and its caller. |
-| `lean_copy_expand_array` paired with `lean::lean_del_core_other` | an array is copied and its old version freed on each update, often from lost exclusivity; `lean_copy_expand_array_nonlinear` appears at the call site, not in self time | Trace retained parents and aliases through the mutation. |
+| `lean_copy_expand_array` paired with `lean::lean_del_core_other` | possibly an array copied and its old version freed on each update, often from lost exclusivity (the deletion symbol covers every non-constructor object, so confirm the kind); `lean_copy_expand_array_nonlinear` appears at the call site, not in self time | Trace retained parents and aliases through the mutation. |
 | `lean_dec_ref_cold` or dense `lean_inc`/`lean_dec` | ownership transfers, aliases, closure captures, or multi-threaded RC | Inspect final IR binders and generated-C ownership across the full call chain. |
 | `lean_is_exclusive` followed by allocation | reset/reuse has a shared fallback | Determine which live reference makes the object non-exclusive. |
 | boxed wrappers around scalar-heavy code | a polymorphic or object-typed boundary needs boxing | Compare concrete and generic signatures and constructor scalar storage. |

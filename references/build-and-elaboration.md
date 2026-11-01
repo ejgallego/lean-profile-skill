@@ -38,13 +38,24 @@ nothing, and the rebuild cone depends on the kind of edit. A trailing comment ca
 rebuild one module while a comment that shifts later lines rebuilds its importers, so
 measure the kinds the user actually makes separately.
 
-Each sample must also produce new downstream artifacts, not just new source. With an
-artifact cache, a second identical line shift restores the importers, and a new field
-whose name never reaches the C restores the C objects, while the source differs both
-times. Vary what reaches the artifacts, such as the number of shifted lines or a string
-default, and restore the source after each sample. Treat a job count that changes
-within one edit kind as an invalid sample, and have the campaign script stop on it:
-in one campaign this silently invalidated 11 of 51 samples. Record source hashes and affected jobs, then verify the
+Declare whether the artifact cache is part of the workload, because the two claims
+need opposite controls:
+
+- A public edit-to-output claim with the cache on includes its hits. They are what
+  the user experiences, so record them rather than engineering them away.
+- A local rebuild or compile-cost claim needs each sample to start from a reproducibly
+  fresh state, such as a fresh worktree or an empty isolated `LAKE_CACHE_DIR`. Lake's
+  `--no-cache` does not provide this: it stops package build-cache downloads, while
+  local artifact reuse follows `enableArtifactCache`. Check this on the pinned
+  toolchain.
+
+Hits are silent. With a shared cache, a second identical line shift restores the
+importers, and a new field whose name never reaches the C restores the C objects, even
+though the source differs both times; this invalidated 11 of 51 samples in one
+campaign. Varying the edit to dodge the cache also changes what is measured, so prefer
+a frozen edit in fresh states, or justify the family of edits. When the rebuild cone is
+part of the declared workload, gate each sample on the exact job identities: a count
+can stay constant while different jobs run. Record source hashes and affected jobs, then verify the
 expected artifacts or behavior with workload-specific checks outside the timed
 interval. For example, check required declarations for a library or expected
 results for an executable. Compare candidate/control semantics appropriate to
@@ -76,8 +87,8 @@ caches to manufacture cold runs; use isolated caches/artifact directories when
 needed and describe the achievable boundary. A project with
 `enableArtifactCache` can otherwise answer a repeated edit from the shared cache;
 set `LAKE_CACHE_DIR` to a directory inside the campaign so samples neither read nor
-fill the user's cache. It grows with every unique edit, reaching several gigabytes in
-one short campaign. It is not evidence, so delete it when the campaign ends.
+fill the user's cache. It grows with every build, reaching several gigabytes in one
+short campaign. It is not evidence, so delete it when the campaign ends.
 
 ## Attribute without conflating phases
 
@@ -195,13 +206,16 @@ identity checks are not an edit-invalidation protocol, and it does not itself
 supply all build resource/job metrics or fresh-output/validation hooks.
 
 Without such a harness, write a small campaign script instead of timing edits by
-hand: apply a unique edit, time `lake build -v` under `/usr/bin/time -v` with the log
+hand: apply the declared edit, time `lake build -v` under `/usr/bin/time -v` with the log
 retained, parse the built jobs, restore the source in a `finally`, and append a JSONL
 row. Job lines look like `ℹ [47/114] Built Pkg.Module (2.1s)`, in `ms` or `s`, and
-`Built Pkg.Module:c.o (with exports)` for C objects. The log has no dependency edges,
-so derive the critical path from each module's `import` lines. Run it as a background
-job, and check that the binaries return to their original hashes after the restoring
-rebuild. If the project does not ignore `_out/`, add it to `.git/info/exclude` so that
+`Built Pkg.Module:c.o (with exports)` for C objects. Prefer observed job timing and
+actual dependency edges where the project exposes them. Stock Lake logs carry no
+scheduler graph, and that limit belongs in the report: `import` lines give only an
+approximate module-elaboration view, which omits IR, C, linking, custom jobs and
+non-source inputs, so do not call it the public build's critical path. Run the
+campaign under the host's long-running execution, and check that the binaries return
+to their original hashes after the restoring rebuild. If the project does not ignore `_out/`, add it to `.git/info/exclude` so that
 tracked files stay untouched and gigabytes of evidence cannot be committed by accident.
 
 Keep project-specific edits, instrumentation and invalidation in local adapters

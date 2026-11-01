@@ -33,17 +33,21 @@ discovery, variables, and redirection when working on Windows even though
 
    | Level | `samply`, `lake samply` | `perf stat` | `perf record` |
    | --- | --- | --- | --- |
-   | 1 or lower | works | works | works |
-   | 2 (a common default) | refuses to run | works | user-space only; see below |
+   | 1 or lower | usually permitted | usually permitted | usually permitted |
+   | 2 (a common default) | refuses to run | commonly per-process user events | commonly user-space only; see below |
 
-   Lowering the level needs root and is the user's decision. Do not change it,
-   and do not stop at it either: at level 2, `perf` still gives attribution.
+   This is the typical result, not a guarantee: capabilities, distribution patches,
+   seccomp and event availability also decide, so test rather than infer. Lowering
+   the level needs root and is the user's decision. Do not change it, and do not stop
+   at it either: at level 2, `perf` often still gives attribution.
 
-2. Verify `perf` with a real sampled recording rather than only `perf stat`. At
-   level 2, `perf stat` succeeds while a plain `perf record --call-graph` fails
-   with `No fallback found for 'cycles:u' for error 13`, because a call graph asks
-   for kernel frames too. Restrict both the event and the call chains to user
-   space, which is all Lean executable work needs:
+2. Probe `perf record` as well as `perf stat`. At level 2, `perf stat` can succeed
+   while a plain `perf record --call-graph` fails with
+   `No fallback found for 'cycles:u' for error 13`, because a call graph asks for
+   kernel frames too. Restrict both the event and the call chains to user space, which
+   is enough for Lean executable work. This only probes permission to open the event;
+   a nonempty capture of the real target must still show usable samples before any
+   attribution:
 
    ```bash
    perf record -e cycles:u -F 997 --user-callchains --call-graph dwarf \
@@ -107,9 +111,11 @@ python3 "$skill_dir/scripts/summarize_profile.py" \
   "$profile_run_dir/profile-demangled.json.gz" --top 20
 ```
 
-It prints thread coverage, the unknown-frame share and self, inclusive and leaf-first
-stack tables; `--thread` narrows to one thread and `--json` keeps a record. It also
-reads Lean's `trace.profiler.output` files, where weights are scope milliseconds, not
+It prints each thread's weight, entry-reaching share and unknown-frame share, then
+self, inclusive and leaf-first stack tables. `--tid` selects one thread, `--thread`
+matches names and `--json` keeps a record. Judge stack quality per thread: well-rooted
+helpers can mask broken stacks on the thread doing the work, so the aggregate is only
+an overview. It also reads Lean's `trace.profiler.output` files, where weights are scope milliseconds, not
 samples, and a parent's "self" is the residual of everything its children and the
 trace threshold left unattributed rather than a hotspot.
 
@@ -285,9 +291,11 @@ count for acceptance work, and repeat `--artifact` for every relevant input.
 
 Before claiming a small effect, measure the noise: run the same binary as both
 baseline and candidate under the identical schedule. The harness warns when the two
-executables are byte-identical, and that warning matters. An accidental A/A run of a
+launchers are byte-identical, and that warning matters: an accidental A/A run of a
 214 ms program over four passes reported a 7.6% median reduction, so check the hashes
-of any two builds before interpreting them.
+of any two builds before interpreting them. Matching launchers alone are not an A/A
+control, because they can load different libraries, resolve adjacent data differently
+or branch on `argv[0]`. Control the loaded images, cwd, environment and inputs too.
 
 Use each `--metadata` key once. The script refuses to overwrite an existing
 output directory and stores raw JSONL rows, command and artifact identities,
@@ -302,10 +310,12 @@ failure, and interruption. An interrupted run exits 130 after recording its row
 and final identity check. On POSIX systems, timeout and interruption terminate
 the command's process group so descendant work does not contaminate later runs.
 Use a finite, positive `--timeout-seconds` to bound each invocation; omit it for
-no harness deadline. The deadline is enforced by a timer so that it does not change
-the measurement. Captures made before this was fixed polled while waiting, which
-added up to 50 ms depending on run length, so treat short runs in older captures that
-set `--timeout-seconds` with that in mind. See [command-import.md](command-import.md#summary-conventions)
+no harness deadline. A blocking waiter removes the length-dependent polling delay of
+older captures, which added up to 50 ms, so treat short runs in captures that set
+`--timeout-seconds` before this fix with that in mind; launch, the waiter and cleanup
+remain harness overhead. Timeout and interrupt cleanup reach the process group on
+POSIX, not descendants that deliberately start a new session, and only the direct
+process on Windows. See [command-import.md](command-import.md#summary-conventions)
 for summary field names and the shared positive-means-faster convention.
 
 Pass `--perf-events` with

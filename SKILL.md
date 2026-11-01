@@ -46,11 +46,12 @@ the user means, rather than explaining a slowness you could not reproduce.
 Profiling work outlives tool calls and shells, and a blocked call looks like a
 hang. These habits keep a capture alive and its evidence trustworthy:
 
-- Estimate a capture before starting it. Run anything that may outlast your
-  shell tool's timeout as a background job, with its log in the evidence
-  directory and a real deadline on the workload. Wait on it in bounded calls
-  shorter than that timeout, and do not let a limit kill a run that restores
-  source in cleanup.
+- Estimate a capture before starting it. Prefer the host's managed long-running
+  execution and bounded polling where it has them, and a background job otherwise.
+  Either way retain the log in the evidence directory, and keep the workload's
+  hard deadline separate from the host's polling interval.
+- Assume any run that edits source can be killed. Work in a disposable copy where
+  you can; otherwise keep a crash-safe restoration and verify source hashes after.
 - Never start an interactive viewer. `lake samply` needs `--no-serve`,
   `samply record` needs `--save-only`, and `samply load` and
   `trace.profiler.serve=true` both serve until stopped. Run a report's HTTP
