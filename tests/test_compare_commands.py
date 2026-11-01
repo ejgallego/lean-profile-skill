@@ -35,44 +35,47 @@ class WaitForExitTests(unittest.TestCase):
     def test_completed_child_reports_its_code_without_any_signal(self) -> None:
         process = self.spawn("sh", "-c", "exit 3")
         with mock.patch.object(compare_commands, "terminate_process_group") as terminate:
-            self.assertEqual(wait_for_exit(process, 30), (3, False, False))
-            self.assertEqual(wait_for_exit(process, None), (3, False, False))
+            self.assertEqual(wait_for_exit(process, 30)[:3], (3, False, False))
         terminate.assert_not_called()
 
     def test_deadline_terminates_without_reporting_an_exit_code(self) -> None:
         process = self.spawn("sleep", "30")
-        self.assertEqual(wait_for_exit(process, 0.05), (None, True, False))
+        self.assertEqual(wait_for_exit(process, 0.05)[:3], (None, True, False))
         self.assertIsNotNone(process.poll())
 
     def test_exit_after_the_deadline_check_counts_as_completion(self) -> None:
         process = self.spawn("true")
         if compare_commands.await_exit_unreaped(process, 5) is None:
             process.wait()
-        with mock.patch.object(compare_commands, "observe_exit", return_value=False), \
+        with mock.patch.object(compare_commands, "observe_exit", return_value=(False, "pidfd")), \
                 mock.patch.object(compare_commands, "terminate_process_group") as terminate:
-            self.assertEqual(wait_for_exit(process, 30), (0, False, False))
+            self.assertEqual(wait_for_exit(process, 30)[:3], (0, False, False))
         terminate.assert_not_called()
 
     def test_interrupt_terminates_the_child(self) -> None:
         process = self.spawn("sleep", "30")
         with mock.patch.object(compare_commands, "observe_exit", side_effect=KeyboardInterrupt):
-            self.assertEqual(wait_for_exit(process, 30), (None, False, True))
+            self.assertEqual(wait_for_exit(process, 30)[:3], (None, False, True))
         self.assertIsNotNone(process.poll())
 
-    def test_failed_observer_keeps_the_deadline_on_a_live_child(self) -> None:
+    def test_failed_observer_keeps_the_deadline_and_reports_the_method(self) -> None:
         for failure in (self.without_pidfd(), mock.patch.object(
                 compare_commands.select, "select", side_effect=OSError("boom"))):
             process = self.spawn("sleep", "30")
             started = time.monotonic()
             with failure:
-                self.assertEqual(wait_for_exit(process, 0.05), (None, True, False))
+                result = wait_for_exit(process, 0.05)
+            self.assertEqual(result[:3], (None, True, False))
+            self.assertEqual(result.exit_observation, "timed-polling")
             self.assertLess(time.monotonic() - started, 5)
             self.assertIsNotNone(process.poll())
 
     def test_fallback_reports_a_normal_exit(self) -> None:
         process = self.spawn("sh", "-c", "exit 4")
         with self.without_pidfd():
-            self.assertEqual(wait_for_exit(process, 30), (4, False, False))
+            result = wait_for_exit(process, 30)
+        self.assertEqual(result[:3], (4, False, False))
+        self.assertEqual(compare_commands.fallback_observation(None), "blocking-wait")
 
     @unittest.skipUnless(hasattr(os, "pidfd_open"), "needs pidfd_open")
     def test_exit_is_observed_without_reaping_the_process_group(self) -> None:
@@ -92,9 +95,66 @@ class WaitForExitTests(unittest.TestCase):
             real_killpg(group, number)
 
         with mock.patch.object(compare_commands.os, "killpg", side_effect=record):
-            compare_commands.terminate_process_group(process)
+            self.assertIsNone(compare_commands.terminate_process_group(process))
         self.assertEqual(seen, [(signal.SIGTERM, None), (signal.SIGKILL, None)])
         self.assertIsNotNone(process.returncode)
+
+    @unittest.skipUnless(os.name == "posix", "process groups are POSIX-specific")
+    def test_denied_group_signal_on_a_live_child_is_bounded_and_reported(self) -> None:
+        process = self.spawn("sleep", "30")
+        started = time.monotonic()
+        with mock.patch.object(compare_commands.os, "killpg", side_effect=PermissionError), \
+                mock.patch.object(compare_commands, "CLEANUP_SECONDS", 0.05):
+            result = wait_for_exit(process, 0.05)
+        self.assertEqual(result[:3], (None, True, False))
+        self.assertIn("killed the root process only", result.cleanup_error)
+        self.assertLess(time.monotonic() - started, 5)
+        self.assertIsNotNone(process.poll())
+
+    @unittest.skipUnless(os.name == "posix", "process groups are POSIX-specific")
+    def test_denied_signal_to_an_exited_root_is_not_an_error(self) -> None:
+        process = self.spawn("true")
+        if compare_commands.await_exit_unreaped(process, 5) is None:
+            process.wait()
+        with mock.patch.object(compare_commands.os, "killpg", side_effect=PermissionError):
+            self.assertIsNone(compare_commands.terminate_process_group(process))
+
+    def capture(self, cwd: Path, **patches: object) -> tuple[int, Path]:
+        """Run the real entry point in-process so a fault can be injected."""
+        argv = ["compare_commands.py", "--baseline", '["true"]', "--candidate", '["sh", "-c", "true"]',
+                "--out-dir", str(cwd / "evidence"), "--timeout-seconds", "30"]
+        with mock.patch.object(sys, "argv", argv), mock.patch("sys.stdout"), mock.patch("sys.stderr"), \
+                mock.patch.multiple(compare_commands, **patches):
+            return compare_commands.main(), cwd / "evidence"
+
+    def test_capture_records_the_method_each_run_used(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            status, evidence = self.capture(
+                Path(temp_dir), planned_exit_observation=lambda _: "pidfd",
+                await_exit_unreaped=mock.Mock(side_effect=lambda process, _: process.wait() is not None))
+            self.assertEqual(status, 0)
+            rows = [json.loads(line) for line in (evidence / "runs.jsonl").read_text().splitlines()]
+            self.assertEqual({row["exit_observation"] for row in rows}, {"pidfd"})
+            manifest = json.loads((evidence / "manifest.json").read_text())
+            self.assertEqual(manifest["elapsed_measurement"]["planned_exit_observation"], "pidfd")
+
+    def test_capture_rejects_a_run_whose_exit_method_changed(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            status, evidence = self.capture(
+                Path(temp_dir), planned_exit_observation=lambda _: "pidfd",
+                await_exit_unreaped=mock.Mock(return_value=None))
+            self.assertNotEqual(status, 0)
+            row = json.loads((evidence / "runs.jsonl").read_text().splitlines()[0])
+            self.assertEqual(row["exit_observation"], "timed-polling")
+            self.assertIn("planned pidfd", row["evidence_error"])
+
+    def test_host_that_must_poll_warns_in_the_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _, evidence = self.capture(
+                Path(temp_dir), planned_exit_observation=lambda _: "timed-polling",
+                await_exit_unreaped=mock.Mock(return_value=None))
+            manifest = json.loads((evidence / "manifest.json").read_text())
+            self.assertIn("cannot observe exit without polling", " ".join(manifest["warnings"]))
 
 
 class CompareCommandsTests(unittest.TestCase):
@@ -528,7 +588,8 @@ class CompareCommandsTests(unittest.TestCase):
             manifest = self.read_json(evidence / "manifest.json")
             self.assertEqual(manifest["perf"]["version"], "perf version test-double")
             self.assertEqual(len(manifest["load_average"]), 3)
-            self.assertIn(manifest["elapsed_measurement"]["exit_observation"], ("pidfd", "polling"))
+            self.assertIn(manifest["elapsed_measurement"]["planned_exit_observation"],
+                          ("pidfd", "timed-polling", "blocking-wait"))
             self.assertIsNone(manifest["git"])
             self.assertIn("no commit is recorded", " ".join(manifest["warnings"]))
             self.assertIn("perf stat wrapper", manifest["elapsed_measurement"]["scope"])

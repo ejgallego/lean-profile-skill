@@ -313,11 +313,16 @@ Use a finite, positive `--timeout-seconds` to bound each invocation; omit it for
 no harness deadline. Where the platform has `os.pidfd_open`, exit is observed without
 polling. That removes the length-dependent delay of older captures, which added up to
 50 ms, so treat short runs in captures that set `--timeout-seconds` before this fix with
-that in mind. Elsewhere, including macOS, a deadline still polls: the manifest records
-this as `elapsed_measurement.exit_observation`, and it does not apply without a
-deadline. Launch and cleanup remain harness overhead. Timeout and interrupt cleanup reach the process group on
+that in mind. Elsewhere, including macOS, a deadline still polls, and the harness warns
+before running. The manifest records the planned method as
+`elapsed_measurement.planned_exit_observation` and each run its actual
+`exit_observation` (`pidfd`, `blocking-wait` or `timed-polling`). A run that used a
+different method from the plan is invalid, because one polling arm could bias the
+comparison. Launch and cleanup remain harness overhead. Timeout and interrupt cleanup reach the process group on
 POSIX, not descendants that deliberately start a new session, and only the direct
-process on Windows. See [command-import.md](command-import.md#summary-conventions)
+process on Windows. Cleanup is bounded: if it cannot be confirmed, for example because
+a sandbox refuses the group signal, the run records why and the comparison fails instead
+of hanging. See [command-import.md](command-import.md#summary-conventions)
 for summary field names and the shared positive-means-faster convention.
 
 Pass `--perf-events` with

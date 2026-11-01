@@ -20,7 +20,7 @@ import time
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 
 def parse_command(value: str, option: str) -> list[str]:
@@ -206,6 +206,10 @@ def check_identity(
     }
 
 
+# Bounds cleanup, so a denied signal cannot turn a deadline into a hang.
+CLEANUP_SECONDS = 5.0
+
+
 def await_exit_unreaped(
     process: subprocess.Popen[bytes], timeout_seconds: float | None
 ) -> bool | None:
@@ -226,42 +230,78 @@ def await_exit_unreaped(
         os.close(descriptor)
 
 
-def signal_group(process: subprocess.Popen[bytes], signal_number: int) -> None:
+def signal_group(process: subprocess.Popen[bytes], signal_number: int) -> bool:
+    """Return False only when the group of a live root refused the signal."""
     try:
         os.killpg(process.pid, signal_number)
-    except (ProcessLookupError, PermissionError):
-        pass  # Empty, or holding only the zombie root on platforms that refuse it.
+    except ProcessLookupError:
+        pass
+    except PermissionError:
+        # macOS refuses a group holding only a zombie; a live root is a real denial.
+        return process.poll() is not None
+    return True
 
 
-def terminate_process_group(process: subprocess.Popen[bytes]) -> None:
+def terminate_process_group(process: subprocess.Popen[bytes]) -> str | None:
+    """Stop the child within a bound, returning what cleanup could not establish."""
+    delivered = True
     if os.name == "posix":
         # The unreaped root reserves the group ID until the final signal.
-        signal_group(process, signal.SIGTERM)
-        if await_exit_unreaped(process, 0.2) is None:
+        delivered = signal_group(process, signal.SIGTERM)
+        if process.returncode is None and await_exit_unreaped(process, 0.2) is None:
             time.sleep(0.2)
-        signal_group(process, signal.SIGKILL)
-    else:
-        if process.poll() is not None:
-            return
+        if process.returncode is None:
+            delivered = signal_group(process, signal.SIGKILL) and delivered
+    elif process.poll() is None:
         process.terminate()
         try:
             process.wait(timeout=0.2)
         except subprocess.TimeoutExpired:
             process.kill()
-    process.wait()
+    try:
+        process.wait(timeout=CLEANUP_SECONDS)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        try:
+            process.wait(timeout=CLEANUP_SECONDS)
+        except subprocess.TimeoutExpired:
+            return "process survived termination"
+        return "process group outlived its signals; killed the root process only"
+    if not delivered:
+        return "process-group signal denied; descendants may have survived"
+    return None
+
+
+def fallback_observation(timeout_seconds: float | None) -> str:
+    if timeout_seconds is not None and os.name == "posix":
+        return "timed-polling"  # Popen.wait(timeout=...) polls with backoff on POSIX.
+    return "blocking-wait"
+
+
+def planned_exit_observation(timeout_seconds: float | None) -> str:
+    """Probe the method this host supports, for comparison with each run's."""
+    try:
+        descriptor = os.pidfd_open(os.getpid())
+    except (AttributeError, OSError):
+        return fallback_observation(timeout_seconds)
+    try:
+        select.select([descriptor], [], [], 0)
+    except (OSError, ValueError):
+        return fallback_observation(timeout_seconds)
+    finally:
+        os.close(descriptor)
+    return "pidfd"
 
 
 def observe_exit(
     process: subprocess.Popen[bytes], timeout_seconds: float | None
-) -> bool:
-    """Return whether the child exited within the deadline."""
-    if process.returncode is not None:
-        return True
+) -> tuple[bool, str]:
+    """Return whether the child exited within the deadline, and how that was seen."""
     started = time.monotonic()
     exited = await_exit_unreaped(process, timeout_seconds)
     if exited is not None:
-        return exited
-    # No pidfd: Popen polls here on POSIX, recorded as exit_observation.
+        return exited, "pidfd"
+    method = fallback_observation(timeout_seconds)
     remaining = (
         None
         if timeout_seconds is None
@@ -270,24 +310,31 @@ def observe_exit(
     try:
         process.wait(timeout=remaining)
     except subprocess.TimeoutExpired:
-        return False
-    return True
+        return False, method
+    return True, method
+
+
+class ExitResult(NamedTuple):
+    exit_code: int | None
+    timed_out: bool = False
+    interrupted: bool = False
+    exit_observation: str | None = None
+    cleanup_error: str | None = None
 
 
 def wait_for_exit(
     process: subprocess.Popen[bytes], timeout_seconds: float | None
-) -> tuple[int | None, bool, bool]:
-    """Return (exit code, timed out, interrupted), the code only for a normal exit."""
+) -> ExitResult:
+    """Wait on this thread alone; the exit code is reported only for a normal exit."""
     try:
-        exited = observe_exit(process, timeout_seconds)
+        exited, method = observe_exit(process, timeout_seconds)
     except KeyboardInterrupt:
-        terminate_process_group(process)
-        return None, False, True
+        return ExitResult(None, interrupted=True, cleanup_error=terminate_process_group(process))
     # A child that exited right at the deadline completed: reap it, do not signal.
     if exited or process.poll() is not None:
-        return process.wait(), False, False
-    terminate_process_group(process)
-    return None, True, False
+        return ExitResult(process.wait(), exit_observation=method)
+    return ExitResult(None, timed_out=True, exit_observation=method,
+                      cleanup_error=terminate_process_group(process))
 
 
 @dataclass(frozen=True)
@@ -298,6 +345,7 @@ class RunContext:
     candidate: list[str]
     expected_exit_code: int
     timeout_seconds: float | None
+    exit_observation: str
     perf: str | None
     perf_events: str | None
 
@@ -361,6 +409,8 @@ def execute_run(
     interrupted = False
     launch_error = None
     evidence_error = None
+    harness_error = None
+    exit_observation = None
     perf_stat_sha256 = None
     exit_code = None
     with stdout_path.open("wb") as stdout, stderr_path.open("wb") as stderr:
@@ -376,9 +426,15 @@ def execute_run(
             launch_error = f"{type(error).__name__}: {error}"
             stderr.write((launch_error + "\n").encode())
         else:
-            exit_code, timed_out, interrupted = wait_for_exit(
-                process, context.timeout_seconds
-            )
+            result = wait_for_exit(process, context.timeout_seconds)
+            exit_code, timed_out, interrupted = result[:3]
+            exit_observation = result.exit_observation
+            harness_error = result.cleanup_error
+            if exit_observation not in (None, context.exit_observation):
+                harness_error = harness_error or (
+                    f"exit observed by {exit_observation}, "
+                    f"planned {context.exit_observation}"
+                )
             if interrupted:
                 stderr.write(b"comparison interrupted by SIGINT\n")
 
@@ -391,8 +447,9 @@ def execute_run(
             perf_stat_sha256, evidence_error = perf_stat_identity(
                 counter_path, context.out_dir
             )
-            if evidence_error:
-                stderr.write((evidence_error + "\n").encode())
+        evidence_error = evidence_error or harness_error
+        if evidence_error:
+            stderr.write((evidence_error + "\n").encode())
 
     elapsed_ns = time.perf_counter_ns() - started_ns
     row = {
@@ -409,6 +466,7 @@ def execute_run(
         "interrupted": interrupted,
         "launch_error": launch_error,
         "evidence_error": evidence_error,
+        "exit_observation": exit_observation,
         "stdout": str(stdout_path.relative_to(context.out_dir)),
         "stderr": str(stderr_path.relative_to(context.out_dir)),
         "perf_stat": (
@@ -607,6 +665,15 @@ def main() -> int:
         preflight_warnings.append(warning)
         print(f"warning: {warning}", file=sys.stderr)
 
+    exit_observation = planned_exit_observation(args.timeout_seconds)
+    if exit_observation == "timed-polling":
+        warning = (
+            "This host cannot observe exit without polling, so --timeout-seconds "
+            "adds up to 50 ms of length-dependent delay; omit it for short runs."
+        )
+        preflight_warnings.append(warning)
+        print(f"warning: {warning}", file=sys.stderr)
+
     git, tracked_diff = git_identity(cwd)
     if git is None:
         warning = (
@@ -634,7 +701,7 @@ def main() -> int:
                 if perf
                 else "child-process wall time including process startup"
             ),
-            "exit_observation": "pidfd" if hasattr(os, "pidfd_open") else "polling",
+            "planned_exit_observation": exit_observation,
         },
         "expected_exit_code": args.expected_exit_code,
         "timeout_seconds": args.timeout_seconds,
@@ -669,6 +736,7 @@ def main() -> int:
         candidate=candidate,
         expected_exit_code=args.expected_exit_code,
         timeout_seconds=args.timeout_seconds,
+        exit_observation=exit_observation,
         perf=perf,
         perf_events=args.perf_events,
     )
