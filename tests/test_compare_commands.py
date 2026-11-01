@@ -89,6 +89,8 @@ class CompareCommandsTests(unittest.TestCase):
             [
                 "git",
                 "-c",
+                "commit.gpgsign=false",
+                "-c",
                 "user.name=Lean Profile Tests",
                 "-c",
                 "user.email=tests@example.invalid",
