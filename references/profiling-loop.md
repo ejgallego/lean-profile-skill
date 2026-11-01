@@ -24,36 +24,57 @@ The command examples in this reference use POSIX shell syntax. Translate command
 discovery, variables, and redirection when working on Windows even though
 `samply` itself supports Windows targets.
 
-1. On Linux, use `perf` only after verifying that it is installed and permitted:
+1. On Linux, read the kernel's sampling policy first, because it decides which
+   backends can work at all:
 
    ```bash
-   command -v perf
-   perf stat -e cycles:u -- true
+   cat /proc/sys/kernel/perf_event_paranoid
    ```
 
-   If the probe reports a permission or unsupported-event error, preserve the
-   exact diagnostic. Do not silently replace attribution with elapsed timings.
+   | Level | `samply`, `lake samply` | `perf stat` | `perf record` |
+   | --- | --- | --- | --- |
+   | 1 or lower | works | works | works |
+   | 2 (a common default) | refuses to run | works | user-space only; see below |
 
-2. For a Lake executable target, feature-detect Lake's integrated `samply`
-   command. It is not present in older toolchains:
+   Lowering the level needs root and is the user's decision. Do not change it,
+   and do not stop at it either: at level 2, `perf` still gives attribution.
+
+2. Verify `perf` with a real sampled recording rather than only `perf stat`. At
+   level 2, `perf stat` succeeds while a plain `perf record --call-graph` fails
+   with `No fallback found for 'cycles:u' for error 13`, because a call graph asks
+   for kernel frames too. Restrict both the event and the call chains to user
+   space, which is all Lean executable work needs:
 
    ```bash
-   lake --help | rg '^[[:space:]]+samply[[:space:]]'
+   perf record -e cycles:u -F 997 --user-callchains --call-graph dwarf \
+     -o /dev/null -- true
+   ```
+
+   Preserve the exact diagnostic if this fails. Do not silently replace attribution
+   with elapsed timings.
+
+3. For a Lake executable target, feature-detect Lake's integrated `samply`
+   command. It first appears in Lean 4.36:
+
+   ```bash
+   lake --help | grep -E '^[[:space:]]+samply[[:space:]]'
    lake help samply
    ```
 
-   Prefer it when available because it builds the selected target in the Lake
-   environment, symbolicates addresses and demangles Lean-generated names.
+   Prefer it when available and the kernel permits it, because it builds the
+   selected target in the Lake environment, symbolicates addresses and demangles
+   Lean-generated names into the saved file.
 
-3. On Linux, macOS, or Windows, use standalone `samply` when it is installed and
-   can record the target. This remains the fallback for older Lake versions,
-   arbitrary binaries and wrappers that are not Lake executable targets:
+4. On Linux, macOS, or Windows, standalone `samply` remains the fallback for older
+   Lake versions, arbitrary binaries and wrappers that are not Lake executable
+   targets. Its saved file holds unresolved addresses, so it needs the Firefox
+   Profiler viewer; for reading results from a terminal, prefer `perf report`:
 
    ```bash
    command -v samply
    ```
 
-4. If no applicable backend works, report the blocker and the attempted commands.
+5. If no applicable backend works, report the blocker and the attempted commands.
    Continue with workload definition and identity capture, but do not make a
    hotspot claim from timing alone.
 
@@ -63,7 +84,7 @@ For a supported pinned toolchain and a `lean_exe` target, use a fresh output
 path and `--no-serve` for unattended capture:
 
 ```bash
-profile_run_dir="_profiles/baseline-001"
+profile_run_dir="_out/performance/baseline-001"
 test ! -e "$profile_run_dir"
 mkdir -p "$profile_run_dir"
 
@@ -78,6 +99,19 @@ the executable's arguments. Omit `--rate 997` or replace it with other supported
 and Lean-name demangling, writes the profile and exits. `--raw` instead preserves
 the raw profile without those post-processing steps. Use interactive serving
 only when the user wants to inspect the profile immediately.
+
+The result is compressed JSON meant for a viewer. To read it from a terminal:
+
+```bash
+python3 "$skill_dir/scripts/summarize_profile.py" \
+  "$profile_run_dir/profile-demangled.json.gz" --top 20
+```
+
+It prints thread coverage, the unknown-frame share and self, inclusive and leaf-first
+stack tables; `--thread` narrows to one thread and `--json` keeps a record. It also
+reads Lean's `trace.profiler.output` files, where weights are scope milliseconds, not
+samples, and a parent's "self" is the residual of everything its children and the
+trace threshold left unattributed rather than a hotspot.
 
 Record `lake --version`, `samply --version`, the exact target and arguments, the
 profile hash, and the final executable hash. `lake samply` builds the target, so
@@ -147,19 +181,24 @@ failed in practice because it tends to identify symptoms rather than the
 compiler/runtime ownership path that caused them.
 
 ```bash
-profile_run_dir="_profiles/baseline-001"
+profile_run_dir="_out/performance/baseline-001"
 test ! -e "$profile_run_dir"
 mkdir -p "$profile_run_dir"
 
-perf record -F 997 --call-graph dwarf -o "$profile_run_dir/perf.data" -- \
-  .lake/build/bin/<exe> <args>
+perf record -e cycles:u -F 997 --user-callchains --call-graph dwarf \
+  -o "$profile_run_dir/perf.data" -- .lake/build/bin/<exe> <args>
 
 perf report --stdio --no-children -i "$profile_run_dir/perf.data" \
   --sort overhead,symbol --percent-limit 0.5
 ```
 
 Use `--no-children` to see self-time target candidates. Use children-inclusive
-views after the self-time view tells you which region matters.
+views after the self-time view tells you which region matters. The warnings about
+`kptr_restrict` and kernel samples are expected for a user-space recording.
+
+Lean runs `main` on a spawned thread, so the recording must inherit threads. Options
+such as `--per-thread` and `--no-inherit` silently lose the workload: a run that
+collected 480 samples by default collected 7 with either one.
 
 If the command launches the real workload through `env`, a shell script, a
 daemon client, or another wrapper, verify the profiler follows the intended
@@ -170,6 +209,13 @@ target executable directly. Immediately sanity-check the capture:
 perf script -i "$profile_run_dir/perf.data" | head
 perf script -i "$profile_run_dir/perf.data" | \
   rg -m 20 '<target-binary>|<project-symbol>|lean_'
+```
+
+For a terminal summary of a `perf` capture, including the stack-depth check below:
+
+```bash
+perf script -i "$profile_run_dir/perf.data" -F comm,tid,ip,sym | \
+  python3 "$skill_dir/scripts/summarize_profile.py" - --top 20
 ```
 
 Reject a capture whose samples are only loader, wrapper, shell-wait, or launcher
@@ -192,7 +238,9 @@ below. Keep warmups separate from measured samples. Treat counters as acceptance
 or regression evidence after a target is known, not as the way to find the
 target.
 
-5. Render flamegraphs when visual call paths would help:
+5. Render flamegraphs when visual call paths would help. `stackcollapse-perf.pl`
+and `flamegraph.pl` come from the separate FlameGraph repository and are often not
+installed; `perf report` and `summarize_profile.py` do not need them:
 
 ```bash
 perf script -i "$profile_run_dir/perf.data" > "$profile_run_dir/perf.script"
@@ -210,9 +258,10 @@ samply record --save-only -o "$profile_run_dir/profile.json.gz" -- \
   .lake/build/bin/<exe> <args>
 ```
 
-Use `samply load "$profile_run_dir/profile.json.gz"` later when interactive
-browsing is useful. `--no-open` alone still starts a local server and can block
-an unattended agent.
+This needs `perf_event_paranoid` at 1 or lower. Use
+`samply load "$profile_run_dir/profile.json.gz"` later when interactive browsing is
+useful. `--no-open` alone still starts a local server and can block an unattended
+agent.
 
 ## Order-Balanced Comparison
 
@@ -228,11 +277,18 @@ python3 "$skill_dir/scripts/compare_commands.py" \
   --metadata build=release \
   --metadata diagnostics=off \
   --passes 2 --warmups 1 \
-  --out-dir _profiles/compare-001
+  --out-dir _out/performance/compare-001
 ```
 
 Two passes provide one AB/BA cycle for screening. Increase to a larger even
 count for acceptance work, and repeat `--artifact` for every relevant input.
+
+Before claiming a small effect, measure the noise: run the same binary as both
+baseline and candidate under the identical schedule. The harness warns when the two
+executables are byte-identical, and that warning matters. An accidental A/A run of a
+214 ms program over four passes reported a 7.6% median reduction, so check the hashes
+of any two builds before interpreting them.
+
 Use each `--metadata` key once. The script refuses to overwrite an existing
 output directory and stores raw JSONL rows, command and artifact identities,
 dirty tracked patches, stdout/stderr, paired savings, and warnings about short or
@@ -246,7 +302,10 @@ failure, and interruption. An interrupted run exits 130 after recording its row
 and final identity check. On POSIX systems, timeout and interruption terminate
 the command's process group so descendant work does not contaminate later runs.
 Use a finite, positive `--timeout-seconds` to bound each invocation; omit it for
-no harness deadline. See [command-import.md](command-import.md#summary-conventions)
+no harness deadline. The deadline is enforced by a timer so that it does not change
+the measurement. Captures made before this was fixed polled while waiting, which
+added up to 50 ms depending on run length, so treat short runs in older captures that
+set `--timeout-seconds` with that in mind. See [command-import.md](command-import.md#summary-conventions)
 for summary field names and the shared positive-means-faster convention.
 
 Pass `--perf-events` with
@@ -289,6 +348,11 @@ Before acting on a sampled profile:
 - check `nm -n .lake/build/bin/<exe> | rg 'lean_|<project symbol>'`;
 - reject call chains with large `[unknown]` sections, small integer return
   addresses, impossible callers, or stacks that end in nonsense addresses;
+- check how deep stacks go and whether they reach a thread entry such as `_start`
+  or `start_thread` (`summarize_profile.py` reports both). Truncation can look clean:
+  on Lean 4.36, `perf` DWARF stacks stopped two frames down at `lean_copy_expand_array`,
+  named a real function as the caller and skipped the true one, with no `[unknown]`
+  frame anywhere. A larger stack dump did not help. Self time was still sound;
 - compare `perf report --no-children` with call-graph views so bad unwinding
   does not hide a strong self-time target.
 - record requested and observed sampling rate, sample/event losses, target
@@ -296,7 +360,9 @@ Before acting on a sampled profile:
   lossy captures instead of silently lowering the rate and replacing them.
 
 When call chains are poor, build a profiling binary with frame-pointer-friendly
-C flags if the project supports it:
+C flags if the project supports it. These reach only the C that the project compiles,
+so they do not repair stacks that break inside the prebuilt Lean runtime; use a census
+for those:
 
 ```text
 -fno-omit-frame-pointer
@@ -324,6 +390,33 @@ Escalate in this order:
 Do not jump directly to debugger instrumentation when samples and generated
 code already explain the caller. Record why each escalation was necessary.
 
+A census counts who actually reaches a runtime function. This x86-64 gdb script reads
+the return address at function entry:
+
+```gdb
+set pagination off
+set confirm off
+break lean_copy_expand_array_nonlinear
+commands
+silent
+info symbol *(void**)$sp
+cont
+end
+run
+```
+
+```bash
+for args in '2000 50000' '0 1'; do
+  gdb -q -batch -x census.gdb --args .lake/build/bin/<exe> $args 2>/dev/null | \
+    rg ' in section' | sed -E 's/ \+ [0-9]+ in section.*//' | sort | uniq -c | sort -rn
+done
+```
+
+Every hit stops the process, so shrink the workload. Pass arguments through `--args`
+and leave `run` bare, because arguments or a redirect on `run` replace them. Always
+pair it with a zero-work run: in a measured case, startup alone made 976 copies from
+`lean_array_push`, unchanged by the workload, beside the 2000 from the real caller.
+
 ## Controlled Windows
 
 If startup, parsing, loading, or snapshot setup dominates the profile, isolate
@@ -346,6 +439,11 @@ representative path. Confirm at least one of:
 - the original hot caller disappeared or shrank;
 - the predicted runtime bucket moved by the expected amount;
 - a new dominant cost replaced it and explains the remaining time.
+
+If the fix makes the run too short to sample, keep the same-path capture for the
+comparison and add a scaled-up candidate-only capture for the remaining cost, labeled
+diagnostic. Compare named buckets rather than percentages, since startup dominates a
+millisecond run.
 
 Treat a timing win without the predicted profile movement as an unresolved
 result. Track executable and hot-symbol sizes before and after any factoring,

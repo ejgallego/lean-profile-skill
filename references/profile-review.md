@@ -90,12 +90,13 @@ when interpreting missing estimates and completion-conditional distributions.
 Example invocation (resolve the actual skill path first):
 
 ```bash
-python3 /path/to/lean-profile-skill/scripts/build_review.py \
+python3 "$skill_dir/scripts/build_review.py" \
   _out/performance/review-input.json --out _out/performance/review-01
 python3 -m http.server 8767 --bind 127.0.0.1 --directory _out/performance
 ```
 
-Open `http://localhost:8767/review-01/`. Choose an available local port. Serve
+The server runs until stopped, so start it in the background and stop it when
+finished. Open `http://localhost:8767/review-01/`. Choose an available local port. Serve
 the common artifact ancestor so linked profiles are reachable; the report does
 not copy potentially huge captures. Keep their paths stable, including symlink
 mount paths. A copied `source-manifest.json` is provenance of the original input;
@@ -110,7 +111,8 @@ get a separate axis. These are descriptive spreads, not confidence intervals.
 Tables and axes choose common s/ms/µs/ns units; displayed values use significant
 digits without changing the numerical model. Exact commands are expandable.
 The tool does not install dependencies. Use a project environment or, for example,
-`uv run --with matplotlib python scripts/build_review.py ... --plots`.
+`uv run --with matplotlib python scripts/build_review.py ... --plots`, which needs
+network access the first time. Without plots, the tables remain complete.
 
 See [review-format.md](review-format.md) for the input contract and
 `examples/review/report.json` for a complete synthetic demonstration. From the
@@ -151,7 +153,33 @@ Investigators must assess that comparability and explain remaining differences.
 Keep nested module or executable diagnostics separate from full public-command
 timing.
 
+## Sharing a report
+
+The report directory alone is not self-contained when evidence links reach outside
+it, so settle where everything lives before generating anything:
+
+- Choose one bundle directory and copy the capture into it first, then run
+  `check_outputs.py` and the importer on that copy. Evidence generated elsewhere
+  records paths that lead out of the bundle.
+- Make manifest links relative to the bundle.
+- Decide what readers should get. Raw manifests legitimately carry the hostname and
+  absolute paths, and they are bound by hash, so editing them breaks validation.
+  Share them as they are, or leave them out and say so; do not scrub them. The report
+  text and `review-data.json` carry the same details, so read those too.
+- Put what the reader needs in the summary and notes. Decisions and the caveats that
+  limit a claim belong there, not only in the linked evidence.
+- Leave the accept/reject decision to its owner unless it was delegated to you.
+
+Where the environment offers private hosting, publishing the report privately for the
+user and giving them the link is fine once they would not be surprised by what it
+contains; leave out raw evidence with paths and hostnames unless they want it. Sending
+it to anyone else is their call.
+
 ## Browser validation
+
+Check the rendered report at desktop and phone widths; a headless browser's
+`--screenshot` is enough for layout. The rest of this section applies when profiles
+are attached.
 
 Check local evidence links over HTTP (important for symlinked artifact trees),
 filters, mobile overflow, and the attached viewer's configuration/thread/mode

@@ -8,11 +8,16 @@ description: Investigate Lean performance across public build/edit-to-output lat
 Use this skill to turn a vague Lean speed problem into comparable measurements,
 credible attribution, and an optimization case that can be safely landed.
 
+Paths to `scripts/`, `references/` and `assets/` are relative to this file's
+directory. Resolve it once; the references call it `$skill_dir`.
+
 ## Choose the timing boundary
 
 - For public build latency, edit-to-output, Lake planning or module elaboration,
   read [build-and-elaboration.md](references/build-and-elaboration.md). Start with
   the public command, affected jobs and Lean frontend evidence.
+- For a whole-library or compiler survey that selects modules to profile, also
+  read [compiler-surveys.md](references/compiler-surveys.md).
 - For Verso documents, also read [verso-builds.md](references/verso-builds.md) for
   authored-module compilation, generator execution and project-specific checks.
 - For compiled executable runtime and generated native code, use the native
@@ -24,9 +29,42 @@ credible attribution, and an optimization case that can be safely landed.
 - For a technical report, timelines or a profile gallery, read
   [profile-review.md](references/profile-review.md). The bundled builder consumes
   explicitly included raw observations and linked captures; it runs no benchmarks.
+  For a pull request, the evidence bundle in
+  [benchmark-design.md](references/benchmark-design.md#evidence-bundle) is usually
+  enough. Evidence directories are often gitignored, so quote the numbers, commands
+  and hashes in the description instead of linking local paths.
 
 Keep public commands, nested module diagnostics and direct executable timings
 separate. Another project's hotspot is a hypothesis, not evidence for this one.
+
+If the public number does not match the complaint, say so first. Bound the worst
+case you can reach, list what you did not measure, and ask which command and hardware
+the user means, rather than explaining a slowness you could not reproduce.
+
+## Running unattended
+
+Profiling work outlives tool calls and shells, and a blocked call looks like a
+hang. These habits keep a capture alive and its evidence trustworthy:
+
+- Estimate a capture before starting it. Run anything that may outlast your
+  shell tool's timeout as a background job, with its log in the evidence
+  directory and a real deadline on the workload. Wait on it in bounded calls
+  shorter than that timeout, and do not let a limit kill a run that restores
+  source in cleanup.
+- Never start an interactive viewer. `lake samply` needs `--no-serve`,
+  `samply record` needs `--save-only`, and `samply load` and
+  `trace.profiler.serve=true` both serve until stopped. Run a report's HTTP
+  server in the background, and stop whatever you started before finishing.
+- Keep evidence in `_out/performance/<campaign>/` or the project's established
+  equivalent, not in temporary storage. A restart can empty temporary directories
+  and end a long investigation with nothing retained.
+- Run timing samples sequentially, with no parallel builds, agents or test suites
+  on the machine. If the host is shared, record its load and limit the claim.
+- Report environment blockers rather than changing them. Kernel profiling
+  settings belong to the user; profile with what is permitted and name the gap.
+- Scale evidence to the decision. An effect of orders of magnitude does not need
+  the sampling a 3% claim does, while landing evidence still needs output checks,
+  an after-profile and the limits of what was measured.
 
 ## Native runtime lessons
 
@@ -76,13 +114,18 @@ dimensions explicitly before proposing a compiler feature or native override.
      the optimization decision.
 
 4. Collect attribution with native profilers.
+   - Run the [backend preflight](references/profiling-loop.md#backend-preflight)
+     first: `perf stat` succeeding does not show that sampling works.
    - For a Lake executable target, prefer `lake samply` when the pinned
-     toolchain provides it; it builds the target and demangles Lean names.
-     Otherwise use `perf record`, standalone `samply`, or the project's profiler.
+     toolchain provides it (Lean 4.36 onward) and the kernel permits it; it builds
+     the target and demangles Lean names. Otherwise use `perf record` or the
+     project's profiler. `scripts/summarize_profile.py` reads `lake samply` and
+     `perf script` output from a terminal and flags truncated stacks.
    - Start with self time, then inspect children and callers.
    - Validate that samples come from the intended process or descendants, not
      only a launcher or waiting parent. A nonempty profile file is not enough.
-   - Validate symbol and call-chain quality before trusting caller stacks.
+   - Validate symbol and call-chain quality before trusting caller stacks. Named
+     frames are not enough: confirm that stacks reach a thread entry.
    - Use frame-pointer builds only as an attribution aid unless the project
      already treats them as its normal benchmark build.
 
@@ -112,9 +155,11 @@ dimensions explicitly before proposing a compiler feature or native override.
 - Read [profiling-loop.md](references/profiling-loop.md) for concrete `perf`,
   flamegraph, `samply`, frame-pointer, and measurement-loop commands, plus the
   order-balanced invocation of the bundled `scripts/compare_commands.py`.
+  Skip it only when the project's own harness already covers these.
 - Read [generated-c-ownership.md](references/generated-c-ownership.md) when the
   profile points at Lean runtime allocation, reference counting, persistent data
-  structure copies, or suspected linearity issues.
+  structure copies, or suspected linearity issues, or when a report attributes a
+  cost to ownership.
 - Read [runtime-mechanics.md](references/runtime-mechanics.md) when interpreting
   boxing or object-layout costs, atomic reference counting, task scheduling,
   synchronization, or channel behavior before choosing an optimization.
@@ -132,7 +177,8 @@ dimensions explicitly before proposing a compiler feature or native override.
 - Do not optimize a focused extraction without reconnecting it to the
   representative workload.
 - Do not trust broken call chains with large `[unknown]` sections, small integer
-  return addresses, or impossible callers.
+  return addresses, impossible callers, or clean-looking stacks that stop after a
+  few frames.
 - Do not add benchmark-pattern recognizers, one-off mini-interpreters, or
   workload-specific fast paths unless the user explicitly wants an experiment.
 - Keep diagnostics, logging, tracing, and ownership probes out of headline

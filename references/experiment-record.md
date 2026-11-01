@@ -59,8 +59,8 @@ mean faster, negative mean slower.
   "attribution": "lean_copy_expand_array_nonlinear in updateState",
   "mechanism": "The candidate retained the old state through the result value.",
   "results": {
-    "raw": "_profiles/compare-001",
-    "runs_jsonl": "_profiles/compare-001/runs.jsonl",
+    "raw": "_out/performance/compare-001",
+    "runs_jsonl": "_out/performance/compare-001/runs.jsonl",
     "paired_savings_ns": [-1200000, 300000, -800000, -1100000],
     "summary": {"median_reduction_pct": -1.2}
   },

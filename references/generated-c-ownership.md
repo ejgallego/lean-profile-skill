@@ -67,8 +67,10 @@ Lake normally writes generated intermediate artifacts, primarily C code, under
 
 ```bash
 rg --files .lake/build | rg '\.c$'
-rg -n 'lean_copy_expand_array(_nonlinear)?|lean_array_set|lean_array_fset|lean_inc|lean_dec' \
-  .lake/build
+# One function: generated C closes nested blocks at column 0, so end at the next export.
+awk '/^LEAN_EXPORT .*my_symbol\(.*\{$/{p=1;print;next} /^LEAN_EXPORT/{p=0} p' path/to/file.c
+rg -n 'lean_array_set|lean_array_fset|lean_inc|lean_dec|lean_is_exclusive' .lake/build \
+  --glob '*.c'
 ```
 
 If the function name is mangled, search for the Lean definition suffix, nearby
@@ -81,9 +83,15 @@ active toolchain's runtime headers, generated C, and sampled native symbols.
 
 Prefer these sample-visible runtime symbols:
 
-- `lean_copy_expand_array_nonlinear`: an explicit profiling marker for an array
-  copy caused by non-exclusive ownership;
 - `lean_copy_expand_array`: array copy or capacity expansion;
+- `lean_copy_expand_array_nonlinear`: the entry for a copy caused by non-exclusive
+  ownership, reached from `lean_ensure_exclusive_array` inside `lean.h`'s inline
+  array operations. Expect it in disassembly, not in generated C, and not in self
+  time: on Lean 4.36 the samples land in `lean_copy_expand_array`, so its absence
+  from a profile or from `.c` files rules nothing out;
+- `lean::lean_del_core_other`: freeing a large object. When a nonlinear update
+  copies an array each iteration, freeing the old copy can cost as much as making
+  the new one (a roughly 50/50 split on one measured workload);
 - `lean_array_push`: array growth or builder pressure;
 - `lean_dec_ref_cold`: object-release/reference-count pressure;
 - `lean_alloc_ctor`: constructor allocation;
@@ -95,13 +103,28 @@ are often inline operations and may not survive as standalone optimized native
 symbols. Do not infer that one marker is always bad. Explain it through the
 caller and the data structure being updated.
 
+A copy call in a binary shows that a copy path exists, not that it runs: fixed and
+slow builds both contain `lean_copy_expand_array_nonlinear`, because every array
+update keeps a shared fallback. Establish reachability from reference counts,
+sampled callers or a counted breakpoint.
+
+A retain alone is not the signal either: what matters is the count at the write. In
+one measured fix of a roughly 1000-fold slowdown, both builds ran `lean_inc_ref` on the
+array field. The fixed build then ran `lean_dec_ref` on the parent before
+`lean_array_fset`, so the field was exclusive when written. The slow build kept the
+parent live for a later branch, so every write copied. Read each path from the retain
+to the write. A range ending at the first `}` in column 0 shows only part of a generated
+function; use the export-bounded form above.
+
 ## Inspection Pattern
 
 1. Find the generated function for the suspected Lean helper.
 2. Draw the live ownership graph from the representative caller to the
    mutation. Include old state, projected fields, result constructors,
    `Option`/error fallbacks, callbacks, closures, and captured environments.
-3. Count runtime calls in the function before and after the candidate change.
+3. Count runtime calls in the function before and after the candidate change, and
+   compare their order: a fix can leave the counts alone and move a release ahead of
+   the update.
 4. Check whether large state values are retained while a nested field mutates.
 5. Confirm the caller still appears or disappears in `perf report` or a
    flamegraph.
@@ -126,8 +149,10 @@ Useful shell shapes:
 
 ```bash
 rg -n 'MyModule.*myHelper|myHelper' .lake/build
-rg -n 'lean_copy_expand_array(_nonlinear)?|lean_array_set|lean_array_fset|lean_inc|lean_dec' \
+rg -n 'lean_array_set|lean_array_fset|lean_inc|lean_dec|lean_is_exclusive' \
   .lake/build/path/to/generated.c
+objdump -d --no-show-raw-insn --disassemble='<mangled-symbol>' .lake/build/bin/<exe> | \
+  rg 'call.*(lean_copy_expand_array|lean_dec_ref_cold)'
 perf report --stdio --no-children -i path/to/perf.data --percent-limit 0.0 | \
   rg 'lean_copy_expand_array(_nonlinear)?|lean_dec_ref_cold|myHelper'
 ```
@@ -211,7 +236,8 @@ ownership, so compare the whole call chain.
 Prefer changes that consume and rebuild state narrowly:
 
 - destructure a large state before calling the mutating helper if that avoids
-  retaining the whole old state;
+  retaining the whole old state. Check the result: a source-level `match` can compile
+  identically to projections, as it did on Lean 4.36 in a case fixed by reordering;
 - push mutation behind a small helper that receives only the field it needs;
 - avoid generic normalized views before mutating a concrete representation;
 - keep debug strings, tracing state, and diagnostic summaries out of the hot

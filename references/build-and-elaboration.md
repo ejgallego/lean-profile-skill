@@ -33,7 +33,18 @@ from the author's checkout.
 
 Choose a representative edit that invalidates the same source on each run.
 Keep the scope of invalidation comparable, whether editing a proof, definition
-or another source input. Record source hashes and affected jobs, then verify the
+or another source input. Lake compares content hashes, so `touch` alone rebuilds
+nothing, and the rebuild cone depends on the kind of edit. A trailing comment can
+rebuild one module while a comment that shifts later lines rebuilds its importers, so
+measure the kinds the user actually makes separately.
+
+Each sample must also produce new downstream artifacts, not just new source. With an
+artifact cache, a second identical line shift restores the importers, and a new field
+whose name never reaches the C restores the C objects, while the source differs both
+times. Vary what reaches the artifacts, such as the number of shifted lines or a string
+default, and restore the source after each sample. Treat a job count that changes
+within one edit kind as an invalid sample, and have the campaign script stop on it:
+in one campaign this silently invalidated 11 of 51 samples. Record source hashes and affected jobs, then verify the
 expected artifacts or behavior with workload-specific checks outside the timed
 interval. For example, check required declarations for a library or expected
 results for an executable. Compare candidate/control semantics appropriate to
@@ -62,7 +73,11 @@ matched pairs with a recorded reason; do not keep only the favorable member.
 Project-clean with dependencies warm, dependency-clean, first bootstrap with
 network acquisition, and OS-cold are distinct workloads. Do not clear shared
 caches to manufacture cold runs; use isolated caches/artifact directories when
-needed and describe the achievable boundary.
+needed and describe the achievable boundary. A project with
+`enableArtifactCache` can otherwise answer a repeated edit from the shared cache;
+set `LAKE_CACHE_DIR` to a directory inside the campaign so samples neither read nor
+fill the user's cache. It grows with every unique edit, reaching several gigabytes in
+one short campaign. It is not evidence, so delete it when the campaign ends.
 
 ## Attribute without conflating phases
 
@@ -70,17 +85,33 @@ needed and describe the achievable boundary.
    dependency critical path. Parallel job CPU/durations are not serial wall time.
    In a multi-module survey, retain module keys and phase data before aggregation;
    confirm selected modules in isolation because their build durations include
-   parallel contention.
+   parallel contention. `lake build -v` logs each job's exact `lean` command. To
+   replay a module without contention, reuse that command with temporary outputs,
+   so that Lake's artifacts stay untouched and the imports stay the build's own:
+
+   ```bash
+   lake env lean Pkg/Module.lean --setup .lake/build/ir/Pkg/Module.setup.json \
+     -o "$tmp/m.olean" -i "$tmp/m.ilean" -c "$tmp/m.c" --json
+   ```
+
+   A file holding only the module's imports gives its import-loading floor, which
+   is often a large share of a short module's time. Older toolchains may lack
+   `--setup`; check `lean --help`. `lake env` itself costs time (0.3 s on one project,
+   more than half of a measured import floor), so for floors resolve `LEAN_PATH` once
+   with `lake env printenv LEAN_PATH` and call `lean` directly.
 2. Separate Lake setup/planning from module jobs, C compilation, linking and
    other subprocesses actually present. If the public command also executes a
    built program, distinguish its startup, work and shutdown from the build.
-   On toolchains that expose LeanIR generation as its own Lake job, distinguish
-   `elabArts` from `irArts`. The deprecated `leanArts` facet delegates to
+   On toolchains that expose LeanIR generation as its own Lake job (Lean 4.36
+   onward), distinguish `elabArts` from `irArts`. The deprecated `leanArts` facet delegates to
    `irArts`, so it is too coarse for attributing that boundary.
 3. Profile affected Lean modules with the toolchain's supported `--profile`,
    `profiler` options or `trace.profiler`. Inspect imports, initialization,
    elaboration, interpretation, compiler transformations, linters and tactics.
    Read toolchain help/local code for exact flags instead of assuming versions.
+   `--profile` reports each declaration or step above `profiler.threshold`, then
+   cumulative category totals, so a quiet run does not mean a cheap module: read the
+   totals and lower the threshold before concluding that nothing stands out.
    A current noninteractive trace capture has this shape:
 
    ```bash
@@ -90,7 +121,9 @@ needed and describe the achievable boundary.
      Module.lean
    ```
 
-   Verify the flags against the pinned Lean version. `trace.profiler.serve=true`
+   The output is Firefox Profiler JSON; `$skill_dir/scripts/summarize_profile.py`
+   reads it from a terminal, though `--profile` is usually the better first view. Add `--setup` as above for a module whose imports need
+   Lake's setup. Verify the flags against the pinned Lean version. `trace.profiler.serve=true`
    is an interactive convenience and can keep the process serving the trace;
    do not use it in an unattended timing loop. These traces describe Lean
    frontend scopes, not native CPU samples or the full public wall-time boundary.
@@ -98,7 +131,16 @@ needed and describe the achievable boundary.
    clock origin and event scope. Attribute expensive enclosing elaborators with
    finer markers only where useful; an enclosing elaborator may aggregate work
    from several declarations, tactics or deferred actions.
-5. Inspect subprocess creation when external helpers could account for the cost.
+5. Inspect subprocess creation when external helpers could account for the cost,
+   and to separate Lean, C compilation and linking on the real parallel timeline.
+   This is a separately labeled diagnostic, not a timing sample:
+
+   ```bash
+   strace -f --seccomp-bpf -ttt -q -e trace=execve,exit_group \
+     -o "$campaign/strace.trace" lake build
+   ```
+
+   `-q` keeps the `+++ exited` lines that close each interval; `-qq` removes them.
    Use native sampling only once native runtime is a material part of the public
    wall time. Then follow the native workflow in SKILL.md.
 
@@ -122,7 +164,7 @@ Workload-dependent lessons worth checking, not assuming:
 
 - Precompilation may improve warm generation while increasing clean-build cost.
   Native initialization may also activate unrelated linters and change output.
-- Where supported, test `precompileImports` and `precompileLibrary` as distinct
+- Where supported (Lean 4.35 onward), test `precompileImports` and `precompileLibrary` as distinct
   configurations rather than aliases for `precompileModules`: they move
   different compilation work across the module/library boundary. Measure their
   no-change, representative-edit and clean-build costs separately.
@@ -151,6 +193,16 @@ project's established equivalent). Reuse the repo's build-aware harness. The
 bundled `compare_commands.py` is for stable command/binary comparisons: its
 identity checks are not an edit-invalidation protocol, and it does not itself
 supply all build resource/job metrics or fresh-output/validation hooks.
+
+Without such a harness, write a small campaign script instead of timing edits by
+hand: apply a unique edit, time `lake build -v` under `/usr/bin/time -v` with the log
+retained, parse the built jobs, restore the source in a `finally`, and append a JSONL
+row. Job lines look like `ℹ [47/114] Built Pkg.Module (2.1s)`, in `ms` or `s`, and
+`Built Pkg.Module:c.o (with exports)` for C objects. The log has no dependency edges,
+so derive the critical path from each module's `import` lines. Run it as a background
+job, and check that the binaries return to their original hashes after the restoring
+rebuild. If the project does not ignore `_out/`, add it to `.git/info/exclude` so that
+tracked files stay untouched and gigabytes of evidence cannot be committed by accident.
 
 Keep project-specific edits, instrumentation and invalidation in local adapters
 rather than hard-coding a textbook or Blueprint workload into the shared skill.

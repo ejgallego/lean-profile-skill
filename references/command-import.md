@@ -6,17 +6,35 @@ recheck binaries against the current checkout, or perform correctness tests.
 The output feeds [the report builder](profile-review.md).
 
 ```bash
-python3 /path/to/lean-profile-skill/scripts/import_comparison.py \
+python3 "$skill_dir/scripts/check_outputs.py" _out/performance/capture \
+  --expected _out/performance/expected-stdout.txt \
+  --scope 'stdout equals the output of an independent reimplementation' \
+  --out _out/performance/checks/validation.json
+python3 "$skill_dir/scripts/import_comparison.py" \
   _out/performance/capture --out _out/performance/import-01 \
   --boundary 'child invocation through exit, including harness bookkeeping' \
   --cohort 'representative workload; same warm-cache policy' \
-  --validation _out/performance/output-validation.json
-python3 /path/to/lean-profile-skill/scripts/build_review.py \
+  --validation _out/performance/checks/validation.json
+python3 "$skill_dir/scripts/build_review.py" \
   _out/performance/import-01/report.json --out _out/performance/review-01
-python3 -m http.server 8767 --bind 127.0.0.1 --directory _out/performance
 ```
 
-Replace the boundary and cohort with the actual conditions. The capture's elapsed
+Curate `report.json` before building a report anyone else will read. The importer
+writes factual boilerplate, not findings. Copy it to `review-input.json` beside
+`observations.jsonl` so that relative paths still resolve, then replace `title`,
+`summary`, each `note` and `decision`; the importer lists both configurations under
+`baselines` so that partial captures stay visible, so drop the `candidate` entry when
+the comparison already shows it. Add `attribution` for any cause you can support,
+and set `decision_status` only if the decision is yours to make.
+
+The importer does not recheck binaries against the current checkout. When source
+trees are retained, rebuilding each in a scratch copy and comparing the result with the
+manifest's `executable_sha256` is cheap and is the strongest evidence that the report's
+diff describes what was measured.
+
+The commands assume the capture sits in `_out/performance/`; to share the result,
+first copy it into the [bundle directory](profile-review.md#sharing-a-report). Replace
+the boundary and cohort with the actual conditions. The capture's elapsed
 clock includes harness work and process startup; timeout readings include
 termination handling. Optional perf-stat captures include instrumentation
 overhead and are labeled diagnostic evidence. Do not relabel these readings as
@@ -115,6 +133,17 @@ the document's binding and artifact bytes, but does not interpret arbitrary
 selectors, rerun checks or prove the investigator's assertions. Do not manufacture
 a `passed` record just to make timings appear. If evidence is unavailable, omit
 the check and retain the resulting limitation.
+
+When the project has no tests, a check written for this comparison is legitimate if
+it could have failed. In order of strength: expected output from an independent
+reimplementation or trusted reference; then the two configurations agreeing with each
+other over more inputs than the benchmark uses. A candidate compared only with its
+own retained output establishes nothing. The bundled `scripts/check_outputs.py` covers
+the common case, comparing every completed run's retained stdout with trusted bytes
+and recording mismatches as `failed`. `--scope` must say what the match establishes
+and what it omits. It handles byte-exact output only; write the validation document
+directly for anything that needs normalizing. It reads the retained capture and does
+not run commands, so generate the expected bytes separately.
 
 ## Provenance and limits
 

@@ -1,0 +1,9 @@
+name = "tally"
+defaultTargets = ["tally"]
+
+[[lean_lib]]
+name = "Tally"
+
+[[lean_exe]]
+name = "tally"
+root = "Main"

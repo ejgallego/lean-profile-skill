@@ -60,8 +60,7 @@ run-order or observed noise. A repository-specific harness may retain one-pass
 runs for quick screening; the bundled helper requires a complete AB/BA cycle and
 therefore starts at two passes.
 
-If the repository has no comparison harness, resolve this skill directory and
-use `scripts/compare_commands.py`. It refuses to overwrite an existing output
+If the repository has no comparison harness, use `scripts/compare_commands.py`. It refuses to overwrite an existing output
 directory and records command arrays, executable and input hashes, Git identity,
 stdout/stderr, elapsed time, optional per-run `perf stat` output, and the AB/BA
 sequence.

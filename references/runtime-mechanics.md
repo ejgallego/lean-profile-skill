@@ -18,7 +18,10 @@ interpretation guide, not a replacement for sampled attribution or a benchmark.
 The concrete interfaces and examples in this reference were validated on
 2026-08-26 against Lean `4.34.0-rc1`, commit
 `3447a668783dbce1a8fdb97101dd067687b2b418`, and Lake
-`5.0.0-src+3447a66`.
+`5.0.0-src+3447a66`. The compiler traces, inlining and specialization attributes,
+`@&`, public async imports and generated-C shapes were rechecked on 2026-10-31
+against Lean `4.36.0-rc2`, commit `b35cb10cf2ced51a2fd1880cfdbf75c71ab7a35a`, and
+`nightly-2026-10-20`.
 
 Treat trace names, attributes, module paths, and generated identifiers as
 toolchain-specific. The runtime principles are more durable, but still verify
@@ -29,7 +32,7 @@ them after changing toolchains. This stamp is not a compatibility promise.
 | Profile or generated-code signal | Likely mechanism | Next deterministic check |
 | --- | --- | --- |
 | allocator or `lean_alloc_ctor` samples | boxing, constructor creation, closure creation, or failed reuse | Inspect `lean_alloc_ctor(tag, objectFields, scalarBytes)` and its caller. |
-| `lean_copy_expand_array_nonlinear` | an array reached mutation without exclusive ownership | Trace retained parents and aliases through the mutation. |
+| `lean_copy_expand_array` paired with `lean::lean_del_core_other` | an array is copied and its old version freed on each update, often from lost exclusivity; `lean_copy_expand_array_nonlinear` appears at the call site, not in self time | Trace retained parents and aliases through the mutation. |
 | `lean_dec_ref_cold` or dense `lean_inc`/`lean_dec` | ownership transfers, aliases, closure captures, or multi-threaded RC | Inspect final IR binders and generated-C ownership across the full call chain. |
 | `lean_is_exclusive` followed by allocation | reset/reuse has a shared fallback | Determine which live reference makes the object non-exclusive. |
 | boxed wrappers around scalar-heavy code | a polymorphic or object-typed boundary needs boxing | Compare concrete and generic signatures and constructor scalar storage. |

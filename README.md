@@ -1,8 +1,31 @@
 # Lean Profile Skill
 
-A Codex skill for investigating Lean build latency, module elaboration, native
-runtime and browser/Wasm widgets. See [SKILL.md](SKILL.md) for the workflow and
-reference routing.
+An agent skill for investigating Lean build latency, module elaboration, native
+runtime and browser/Wasm widgets, used with Claude Code and Codex. See
+[SKILL.md](SKILL.md) for the workflow and reference routing.
+
+## Install
+
+Skills are directories that agents discover by location. Deploy a reviewed commit
+rather than a working tree:
+
+```bash
+# Claude Code (any project); use .claude/skills/ in a repository to scope it there
+mkdir -p ~/.claude/skills/lean-profile-skill
+git archive HEAD | tar -x -C ~/.claude/skills/lean-profile-skill
+
+# Codex
+mkdir -p ~/.codex/skills/lean-profile-skill
+git archive HEAD | tar -x -C ~/.codex/skills/lean-profile-skill
+```
+
+Claude Code loads it when a task matches the description, or directly with
+`/lean-profile-skill`. Native sampling depends on the kernel: `samply` and
+`lake samply` need `perf_event_paranoid` at 1 or lower, while `perf` also works at
+the common default of 2 with user-space events. See the
+[backend preflight](references/profiling-loop.md#backend-preflight).
+
+## Reports
 
 The skill includes a static evidence-report builder. It computes baseline and
 paired-comparison statistics from explicitly included CSV or JSONL observations,
@@ -18,6 +41,9 @@ python3 scripts/build_review.py examples/review/report.json --out _out/review-de
 python3 -m unittest discover -s tests -v
 node --test tests/test_review_js.cjs
 ```
+
+`evals/` holds an agent test case with a known answer, in the layout read by
+`claude plugin eval . --allow-tools Write,Edit,Bash --scaffold`.
 
 Serve the common ancestor of the report and its linked profiles over HTTP;
 for this example, use `python3 -m http.server 8767 --bind 127.0.0.1` from the
@@ -35,12 +61,14 @@ current [input contract](references/review-format.md) when preparing a manifest.
 
 ## Repository layout
 
-- `SKILL.md` and `agents/openai.yaml`: workflow routing and skill metadata.
+- `SKILL.md`: workflow routing, read by every agent. `agents/openai.yaml` adds
+  Codex interface metadata.
 - `references/`: public-build, elaboration, Verso, native-runtime and browser/Wasm
   guidance, plus the report guide and input contract.
-- `scripts/`: command comparison harness, retained-capture importer, shared
-  observation model, report builder, and optional plots. Importing and reporting
-  consume evidence without running benchmarks.
+- `scripts/`: command comparison harness, profile summarizer, output checker,
+  retained-capture importer, shared observation model, report builder, and optional
+  plots. Everything except the comparison harness reads evidence without running
+  benchmarks.
 - `assets/`: local report HTML, CSS and browser controls.
 - `examples/review/`: small synthetic report inputs and trace.
 - `tests/`: existing command-harness tests and report tests, discovered together

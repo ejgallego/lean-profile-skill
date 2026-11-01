@@ -1,0 +1,10 @@
+schema_version: "1.1"
+name: native-tally-slow
+expected_outcome: |
+  `Hist.record` computes the updated counts before testing the limit, so the old
+  `Hist` is still live for the frozen branch and every update copies the whole
+  array. The fix moves the update into the branch that consumes `h`, taking the
+  default run from seconds to milliseconds with identical output. The evidence is
+  a sampled profile, generated C, and an order-balanced comparison with raw runs.
+context:
+  scaffold_script: place-files.sh
