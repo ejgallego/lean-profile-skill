@@ -10,12 +10,12 @@ import json
 import math
 import os
 import platform
+import select
 import signal
 import shutil
 import statistics
 import subprocess
 import sys
-import threading
 import time
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -206,80 +206,88 @@ def check_identity(
     }
 
 
+def await_exit_unreaped(
+    process: subprocess.Popen[bytes], timeout_seconds: float | None
+) -> bool | None:
+    """Return whether the child exited in time, or None if this cannot be observed.
+
+    A pidfd blocks without polling and leaves the child unreaped, so its process
+    group ID stays reserved until the caller decides what to do.
+    """
+    try:
+        descriptor = os.pidfd_open(process.pid)
+    except (AttributeError, OSError):
+        return None
+    try:
+        return bool(select.select([descriptor], [], [], timeout_seconds)[0])
+    except (OSError, ValueError):
+        return None
+    finally:
+        os.close(descriptor)
+
+
+def signal_group(process: subprocess.Popen[bytes], signal_number: int) -> None:
+    try:
+        os.killpg(process.pid, signal_number)
+    except (ProcessLookupError, PermissionError):
+        pass  # Empty, or holding only the zombie root on platforms that refuse it.
+
+
 def terminate_process_group(process: subprocess.Popen[bytes]) -> None:
     if os.name == "posix":
-        try:
-            os.killpg(process.pid, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
+        # The unreaped root reserves the group ID until the final signal.
+        signal_group(process, signal.SIGTERM)
+        if await_exit_unreaped(process, 0.2) is None:
+            time.sleep(0.2)
+        signal_group(process, signal.SIGKILL)
     else:
         if process.poll() is not None:
             return
         process.terminate()
-    try:
-        process.wait(timeout=0.2)
-    except subprocess.TimeoutExpired:
-        pass
-    if os.name == "posix":
         try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-    else:
-        if process.poll() is None:
+            process.wait(timeout=0.2)
+        except subprocess.TimeoutExpired:
             process.kill()
-    if process.poll() is None:
-        process.wait()
+    process.wait()
 
 
-def block_until_exit(process: subprocess.Popen[bytes]) -> None:
-    """Wait for exit, leaving the child unreaped where the platform allows it.
-
-    A zombie keeps its process group ID reserved, so the group stays safe to
-    signal until the main thread reaps it.
-    """
-    if not hasattr(os, "waitid"):
-        process.wait()
-        return
+def observe_exit(
+    process: subprocess.Popen[bytes], timeout_seconds: float | None
+) -> bool:
+    """Return whether the child exited within the deadline."""
+    if process.returncode is not None:
+        return True
+    started = time.monotonic()
+    exited = await_exit_unreaped(process, timeout_seconds)
+    if exited is not None:
+        return exited
+    # No pidfd: Popen polls here on POSIX, recorded as exit_observation.
+    remaining = (
+        None
+        if timeout_seconds is None
+        else max(0.0, timeout_seconds - (time.monotonic() - started))
+    )
     try:
-        os.waitid(os.P_PID, process.pid, os.WEXITED | os.WNOWAIT)
-    except ChildProcessError:
-        pass  # Already reaped, so there is nothing left to wait for.
+        process.wait(timeout=remaining)
+    except subprocess.TimeoutExpired:
+        return False
+    return True
 
 
 def wait_for_exit(
-    process: subprocess.Popen[bytes],
-    timeout_seconds: float | None,
-    finished: threading.Event | None = None,
+    process: subprocess.Popen[bytes], timeout_seconds: float | None
 ) -> tuple[int | None, bool, bool]:
-    """Return (exit code, timed out, interrupted), the code only for a normal exit.
-
-    Popen.wait(timeout=...) polls with backoff of up to 50 ms, which delays
-    observing exit by an amount that depends on the run's own length. A waiter
-    thread blocks instead, and only this thread signals the process group.
-    """
-    finished = finished or threading.Event()
-
-    def watch() -> None:
-        try:
-            block_until_exit(process)
-        finally:
-            finished.set()  # A failed wait must not strand the main thread.
-
-    waiter = threading.Thread(target=watch, daemon=True)
-    waiter.start()
-    timed_out = interrupted = False
+    """Return (exit code, timed out, interrupted), the code only for a normal exit."""
     try:
-        timed_out = not finished.wait(timeout_seconds) and not finished.is_set()
+        exited = observe_exit(process, timeout_seconds)
     except KeyboardInterrupt:
-        interrupted = True
-    if timed_out or interrupted:
         terminate_process_group(process)
-    waiter.join()
-    exit_code = process.wait()
-    if timed_out or interrupted:
-        return None, timed_out, interrupted
-    return exit_code, False, False
+        return None, False, True
+    # A child that exited right at the deadline completed: reap it, do not signal.
+    if exited or process.poll() is not None:
+        return process.wait(), False, False
+    terminate_process_group(process)
+    return None, True, False
 
 
 @dataclass(frozen=True)
@@ -626,6 +634,7 @@ def main() -> int:
                 if perf
                 else "child-process wall time including process startup"
             ),
+            "exit_observation": "pidfd" if hasattr(os, "pidfd_open") else "polling",
         },
         "expected_exit_code": args.expected_exit_code,
         "timeout_seconds": args.timeout_seconds,

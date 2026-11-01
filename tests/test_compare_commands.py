@@ -7,7 +7,6 @@ import signal
 import subprocess
 import sys
 import tempfile
-import threading
 import time
 import unittest
 from pathlib import Path
@@ -28,6 +27,11 @@ class WaitForExitTests(unittest.TestCase):
         self.addCleanup(process.kill)
         return process
 
+    def without_pidfd(self) -> mock._patch:
+        return mock.patch.object(
+            compare_commands.os, "pidfd_open", side_effect=OSError("unavailable"), create=True
+        )
+
     def test_completed_child_reports_its_code_without_any_signal(self) -> None:
         process = self.spawn("sh", "-c", "exit 3")
         with mock.patch.object(compare_commands, "terminate_process_group") as terminate:
@@ -40,38 +44,57 @@ class WaitForExitTests(unittest.TestCase):
         self.assertEqual(wait_for_exit(process, 0.05), (None, True, False))
         self.assertIsNotNone(process.poll())
 
-    def test_exit_racing_the_deadline_counts_as_completion(self) -> None:
-        class LateEvent(threading.Event):
-            def wait(self, timeout: float | None = None) -> bool:
-                super().wait(5)
-                return False
-
+    def test_exit_after_the_deadline_check_counts_as_completion(self) -> None:
         process = self.spawn("true")
-        with mock.patch.object(compare_commands, "terminate_process_group") as terminate:
-            self.assertEqual(wait_for_exit(process, 30, LateEvent()), (0, False, False))
+        if compare_commands.await_exit_unreaped(process, 5) is None:
+            process.wait()
+        with mock.patch.object(compare_commands, "observe_exit", return_value=False), \
+                mock.patch.object(compare_commands, "terminate_process_group") as terminate:
+            self.assertEqual(wait_for_exit(process, 30), (0, False, False))
         terminate.assert_not_called()
 
-    def test_interrupt_terminates_and_joins_the_waiter(self) -> None:
-        class Interrupted(threading.Event):
-            def wait(self, timeout: float | None = None) -> bool:
-                raise KeyboardInterrupt
-
+    def test_interrupt_terminates_the_child(self) -> None:
         process = self.spawn("sleep", "30")
-        self.assertEqual(wait_for_exit(process, 30, Interrupted()), (None, False, True))
+        with mock.patch.object(compare_commands, "observe_exit", side_effect=KeyboardInterrupt):
+            self.assertEqual(wait_for_exit(process, 30), (None, False, True))
         self.assertIsNotNone(process.poll())
 
-    def test_failed_wait_cannot_hang_the_harness(self) -> None:
-        process = self.spawn("true")
-        process.wait()
-        with mock.patch.object(compare_commands, "block_until_exit", side_effect=OSError("boom")), \
-                mock.patch.object(threading, "excepthook"):
-            self.assertEqual(wait_for_exit(process, None), (0, False, False))
+    def test_failed_observer_keeps_the_deadline_on_a_live_child(self) -> None:
+        for failure in (self.without_pidfd(), mock.patch.object(
+                compare_commands.select, "select", side_effect=OSError("boom"))):
+            process = self.spawn("sleep", "30")
+            started = time.monotonic()
+            with failure:
+                self.assertEqual(wait_for_exit(process, 0.05), (None, True, False))
+            self.assertLess(time.monotonic() - started, 5)
+            self.assertIsNotNone(process.poll())
 
-    @unittest.skipUnless(hasattr(os, "waitid"), "needs waitid")
+    def test_fallback_reports_a_normal_exit(self) -> None:
+        process = self.spawn("sh", "-c", "exit 4")
+        with self.without_pidfd():
+            self.assertEqual(wait_for_exit(process, 30), (4, False, False))
+
+    @unittest.skipUnless(hasattr(os, "pidfd_open"), "needs pidfd_open")
     def test_exit_is_observed_without_reaping_the_process_group(self) -> None:
         process = self.spawn("true")
-        compare_commands.block_until_exit(process)
+        self.assertTrue(compare_commands.await_exit_unreaped(process, 5))
+        self.assertIsNone(process.returncode)
         os.killpg(process.pid, 0)  # Still reserved, so signaling it cannot hit a stranger.
+
+    @unittest.skipUnless(os.name == "posix", "process groups are POSIX-specific")
+    def test_root_stays_unreaped_through_the_final_group_signal(self) -> None:
+        process = self.spawn("sleep", "30")
+        seen: list[tuple[int, int | None]] = []
+        real_killpg = os.killpg
+
+        def record(group: int, number: int) -> None:
+            seen.append((number, process.returncode))
+            real_killpg(group, number)
+
+        with mock.patch.object(compare_commands.os, "killpg", side_effect=record):
+            compare_commands.terminate_process_group(process)
+        self.assertEqual(seen, [(signal.SIGTERM, None), (signal.SIGKILL, None)])
+        self.assertIsNotNone(process.returncode)
 
 
 class CompareCommandsTests(unittest.TestCase):
@@ -505,6 +528,7 @@ class CompareCommandsTests(unittest.TestCase):
             manifest = self.read_json(evidence / "manifest.json")
             self.assertEqual(manifest["perf"]["version"], "perf version test-double")
             self.assertEqual(len(manifest["load_average"]), 3)
+            self.assertIn(manifest["elapsed_measurement"]["exit_observation"], ("pidfd", "polling"))
             self.assertIsNone(manifest["git"])
             self.assertIn("no commit is recorded", " ".join(manifest["warnings"]))
             self.assertIn("perf stat wrapper", manifest["elapsed_measurement"]["scope"])
