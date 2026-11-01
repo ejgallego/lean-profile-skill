@@ -62,10 +62,35 @@ class SummarizeTests(unittest.TestCase):
         self.assertEqual(result["unknown_leaf_percent"], 100.0)
         self.assertTrue(any("unsymbolicated" in warning for warning in result["warnings"]))
 
-    def test_off_cpu_weight_is_reported_not_attributed(self):
-        result = self.summary(self.profile([2, 1], threadCPUDelta=[0, None]))
-        self.assertEqual(result["self"], [dict(percent=100.0, name="Hist.record")])
-        self.assertTrue(any("off-CPU" in warning for warning in result["warnings"]))
+    def test_cpu_delta_is_not_run_state(self):
+        # Samply's first delta on each thread is zero and means nothing.
+        result = self.summary(self.profile([2, 1], threadCPUDelta=[0, 5], weightType="samples"))
+        self.assertEqual(result["total"], 2)
+        self.assertEqual([row["percent"] for row in result["self"]], [50.0, 50.0])
+        self.assertFalse(any("off-CPU" in warning for warning in result["warnings"]))
+
+    def test_mismatched_columns_are_refused(self):
+        with self.assertRaises(ValueError):
+            self.summary(self.profile([2, 1], weight=[1]))
+        profile = self.profile([2])
+        profile["threads"][0]["stackTable"]["prefix"].pop()
+        with self.assertRaises(ValueError):
+            self.summary(profile)
+
+    def test_helper_threads_cannot_mask_a_truncated_worker(self):
+        names = ["start_thread", "worker", "lean_copy_expand_array"]
+        worker = thread(names, [(None, 1), (0, 2)], [1] * 60)
+        worker["tid"] = 8
+        helper = thread(names, [(None, 0), (0, 1)], [1] * 140)
+        helper["tid"] = 9
+        profile = dict(meta=dict(product="lean", interval=1.0), shared=dict(stringArray=names),
+                       threads=[worker, helper])
+        result = self.summary(profile)
+        self.assertEqual(result["rooted_stack_percent"], 70.0)
+        self.assertEqual(sum("tid 8" in warning for warning in result["warnings"]), 1)
+        self.assertEqual(self.summary(profile, tid="9")["total"], 140)
+        self.assertFalse(any("thread entry" in warning for warning in
+                             self.summary(profile, tid="9")["warnings"]))
 
     def test_thread_filter_and_empty_capture(self):
         self.assertEqual(self.summary(self.profile([2]), thread="tally")["total"], 1)
@@ -95,13 +120,11 @@ class SummarizeTests(unittest.TestCase):
     def test_clean_looking_truncated_stacks_are_flagged(self):
         result = self.perf("tally  42 \n\t  10 lean_copy_expand_array\n\t  20 lp_tally_run\n\n")
         self.assertEqual(result["unknown_leaf_percent"], 0.0)
-        self.assertTrue(any("stop before a thread entry" in warning for warning in result["warnings"]))
+        self.assertTrue(any("reaches a thread entry" in warning for warning in result["warnings"]))
 
     def test_lean_trace_scopes_are_not_presented_as_samples(self):
-        profile = self.profile([2])
-        profile["meta"] = dict(product="lean", interval=0)
-        result = self.summary(profile)
-        self.assertIn("scope milliseconds", result["source"])
+        result = self.summary(self.profile([2], weight=[7.5], weightType="tracing-ms"))
+        self.assertTrue(result["trace"])
         self.assertTrue(any("not samples" in warning for warning in result["warnings"]))
         self.assertFalse(any("thread entry" in warning for warning in result["warnings"]))
 

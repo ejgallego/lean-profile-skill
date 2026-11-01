@@ -7,31 +7,71 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 COMPARE_SCRIPT = REPOSITORY_ROOT / "scripts" / "compare_commands.py"
 sys.path.insert(0, str(REPOSITORY_ROOT / "scripts"))
+import compare_commands
 from compare_commands import summarize_comparison, wait_for_exit, write_json
 
 
 class WaitForExitTests(unittest.TestCase):
-    def test_deadline_does_not_make_the_wait_poll(self) -> None:
-        class Blocking:
-            def wait(self, timeout: float | None = None) -> int:
-                if timeout is not None:
-                    raise AssertionError("a timed wait polls and inflates elapsed time")
-                return 3
+    def spawn(self, *argv: str) -> subprocess.Popen[bytes]:
+        process = subprocess.Popen(list(argv), start_new_session=True)
+        self.addCleanup(process.wait)
+        self.addCleanup(process.kill)
+        return process
 
-        self.assertEqual(wait_for_exit(Blocking(), 30), (3, False))
+    def test_completed_child_reports_its_code_without_any_signal(self) -> None:
+        process = self.spawn("sh", "-c", "exit 3")
+        with mock.patch.object(compare_commands, "terminate_process_group") as terminate:
+            self.assertEqual(wait_for_exit(process, 30), (3, False, False))
+            self.assertEqual(wait_for_exit(process, None), (3, False, False))
+        terminate.assert_not_called()
 
-    def test_deadline_reports_expiry_without_an_exit_code(self) -> None:
-        process = subprocess.Popen(["sleep", "30"], start_new_session=True)
-        self.assertEqual(wait_for_exit(process, 0.05), (None, True))
+    def test_deadline_terminates_without_reporting_an_exit_code(self) -> None:
+        process = self.spawn("sleep", "30")
+        self.assertEqual(wait_for_exit(process, 0.05), (None, True, False))
         self.assertIsNotNone(process.poll())
+
+    def test_exit_racing_the_deadline_counts_as_completion(self) -> None:
+        class LateEvent(threading.Event):
+            def wait(self, timeout: float | None = None) -> bool:
+                super().wait(5)
+                return False
+
+        process = self.spawn("true")
+        with mock.patch.object(compare_commands, "terminate_process_group") as terminate:
+            self.assertEqual(wait_for_exit(process, 30, LateEvent()), (0, False, False))
+        terminate.assert_not_called()
+
+    def test_interrupt_terminates_and_joins_the_waiter(self) -> None:
+        class Interrupted(threading.Event):
+            def wait(self, timeout: float | None = None) -> bool:
+                raise KeyboardInterrupt
+
+        process = self.spawn("sleep", "30")
+        self.assertEqual(wait_for_exit(process, 30, Interrupted()), (None, False, True))
+        self.assertIsNotNone(process.poll())
+
+    def test_failed_wait_cannot_hang_the_harness(self) -> None:
+        process = self.spawn("true")
+        process.wait()
+        with mock.patch.object(compare_commands, "block_until_exit", side_effect=OSError("boom")), \
+                mock.patch.object(threading, "excepthook"):
+            self.assertEqual(wait_for_exit(process, None), (0, False, False))
+
+    @unittest.skipUnless(hasattr(os, "waitid"), "needs waitid")
+    def test_exit_is_observed_without_reaping_the_process_group(self) -> None:
+        process = self.spawn("true")
+        compare_commands.block_until_exit(process)
+        os.killpg(process.pid, 0)  # Still reserved, so signaling it cannot hit a stranger.
 
 
 class CompareCommandsTests(unittest.TestCase):
@@ -271,7 +311,7 @@ class CompareCommandsTests(unittest.TestCase):
             self.assertIn("positive even number", result.stderr)
             self.assertFalse((cwd / "evidence").exists())
 
-    def test_identical_executables_warn_as_noise_even_at_different_paths(self) -> None:
+    def test_identical_launchers_warn_without_claiming_an_a_a_control(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             cwd = Path(temp_dir)
             baseline = cwd / "baseline"
@@ -286,7 +326,9 @@ class CompareCommandsTests(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             manifest = self.read_json(cwd / "evidence" / "manifest.json")
-            self.assertIn("any measured difference is noise", " ".join(manifest["warnings"]))
+            warnings = " ".join(manifest["warnings"])
+            self.assertIn("byte-identical executables", warnings)
+            self.assertIn("A/A control only if loaded libraries", warnings)
 
     def test_invalid_timeout_is_refused_before_launch_or_output(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

@@ -232,34 +232,54 @@ def terminate_process_group(process: subprocess.Popen[bytes]) -> None:
         process.wait()
 
 
-def wait_for_exit(
-    process: subprocess.Popen[bytes], timeout_seconds: float | None
-) -> tuple[int | None, bool]:
-    """Block until exit, returning the exit code and whether the deadline fired.
+def block_until_exit(process: subprocess.Popen[bytes]) -> None:
+    """Wait for exit, leaving the child unreaped where the platform allows it.
 
-    Popen.wait(timeout=...) polls with backoff of up to 50 ms, which inflates
-    elapsed time by an amount that depends on the run's own length. A timer
-    keeps the deadline while the wait itself stays blocking.
+    A zombie keeps its process group ID reserved, so the group stays safe to
+    signal until the main thread reaps it.
     """
-    if timeout_seconds is None:
-        return process.wait(), False
-    expired = threading.Event()
-
-    def expire() -> None:
-        expired.set()
-        terminate_process_group(process)
-
-    timer = threading.Timer(timeout_seconds, expire)
-    timer.daemon = True
-    timer.start()
+    if not hasattr(os, "waitid"):
+        process.wait()
+        return
     try:
-        exit_code = process.wait()
-    finally:
-        timer.cancel()
-        timer.join()
-    if expired.is_set():
-        return None, True
-    return exit_code, False
+        os.waitid(os.P_PID, process.pid, os.WEXITED | os.WNOWAIT)
+    except ChildProcessError:
+        pass  # Already reaped, so there is nothing left to wait for.
+
+
+def wait_for_exit(
+    process: subprocess.Popen[bytes],
+    timeout_seconds: float | None,
+    finished: threading.Event | None = None,
+) -> tuple[int | None, bool, bool]:
+    """Return (exit code, timed out, interrupted), the code only for a normal exit.
+
+    Popen.wait(timeout=...) polls with backoff of up to 50 ms, which delays
+    observing exit by an amount that depends on the run's own length. A waiter
+    thread blocks instead, and only this thread signals the process group.
+    """
+    finished = finished or threading.Event()
+
+    def watch() -> None:
+        try:
+            block_until_exit(process)
+        finally:
+            finished.set()  # A failed wait must not strand the main thread.
+
+    waiter = threading.Thread(target=watch, daemon=True)
+    waiter.start()
+    timed_out = interrupted = False
+    try:
+        timed_out = not finished.wait(timeout_seconds) and not finished.is_set()
+    except KeyboardInterrupt:
+        interrupted = True
+    if timed_out or interrupted:
+        terminate_process_group(process)
+    waiter.join()
+    exit_code = process.wait()
+    if timed_out or interrupted:
+        return None, timed_out, interrupted
+    return exit_code, False, False
 
 
 @dataclass(frozen=True)
@@ -348,11 +368,10 @@ def execute_run(
             launch_error = f"{type(error).__name__}: {error}"
             stderr.write((launch_error + "\n").encode())
         else:
-            try:
-                exit_code, timed_out = wait_for_exit(process, context.timeout_seconds)
-            except KeyboardInterrupt:
-                interrupted = True
-                terminate_process_group(process)
+            exit_code, timed_out, interrupted = wait_for_exit(
+                process, context.timeout_seconds
+            )
+            if interrupted:
                 stderr.write(b"comparison interrupted by SIGINT\n")
 
         if (
@@ -573,8 +592,9 @@ def main() -> int:
         and baseline[1:] == candidate[1:]
     ):
         warning = (
-            "Baseline and candidate run byte-identical executables with the same "
-            "arguments; any measured difference is noise."
+            "Baseline and candidate launch byte-identical executables with the "
+            "same arguments. This is an A/A control only if loaded libraries, "
+            "cwd, environment and inputs also match."
         )
         preflight_warnings.append(warning)
         print(f"warning: {warning}", file=sys.stderr)
