@@ -15,7 +15,23 @@ from pathlib import Path
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 COMPARE_SCRIPT = REPOSITORY_ROOT / "scripts" / "compare_commands.py"
 sys.path.insert(0, str(REPOSITORY_ROOT / "scripts"))
-from compare_commands import summarize_comparison, write_json
+from compare_commands import summarize_comparison, wait_for_exit, write_json
+
+
+class WaitForExitTests(unittest.TestCase):
+    def test_deadline_does_not_make_the_wait_poll(self) -> None:
+        class Blocking:
+            def wait(self, timeout: float | None = None) -> int:
+                if timeout is not None:
+                    raise AssertionError("a timed wait polls and inflates elapsed time")
+                return 3
+
+        self.assertEqual(wait_for_exit(Blocking(), 30), (3, False))
+
+    def test_deadline_reports_expiry_without_an_exit_code(self) -> None:
+        process = subprocess.Popen(["sleep", "30"], start_new_session=True)
+        self.assertEqual(wait_for_exit(process, 0.05), (None, True))
+        self.assertIsNotNone(process.poll())
 
 
 class CompareCommandsTests(unittest.TestCase):

@@ -15,6 +15,7 @@ import shutil
 import statistics
 import subprocess
 import sys
+import threading
 import time
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -231,6 +232,36 @@ def terminate_process_group(process: subprocess.Popen[bytes]) -> None:
         process.wait()
 
 
+def wait_for_exit(
+    process: subprocess.Popen[bytes], timeout_seconds: float | None
+) -> tuple[int | None, bool]:
+    """Block until exit, returning the exit code and whether the deadline fired.
+
+    Popen.wait(timeout=...) polls with backoff of up to 50 ms, which inflates
+    elapsed time by an amount that depends on the run's own length. A timer
+    keeps the deadline while the wait itself stays blocking.
+    """
+    if timeout_seconds is None:
+        return process.wait(), False
+    expired = threading.Event()
+
+    def expire() -> None:
+        expired.set()
+        terminate_process_group(process)
+
+    timer = threading.Timer(timeout_seconds, expire)
+    timer.daemon = True
+    timer.start()
+    try:
+        exit_code = process.wait()
+    finally:
+        timer.cancel()
+        timer.join()
+    if expired.is_set():
+        return None, True
+    return exit_code, False
+
+
 @dataclass(frozen=True)
 class RunContext:
     cwd: Path
@@ -318,10 +349,7 @@ def execute_run(
             stderr.write((launch_error + "\n").encode())
         else:
             try:
-                exit_code = process.wait(timeout=context.timeout_seconds)
-            except subprocess.TimeoutExpired:
-                timed_out = True
-                terminate_process_group(process)
+                exit_code, timed_out = wait_for_exit(process, context.timeout_seconds)
             except KeyboardInterrupt:
                 interrupted = True
                 terminate_process_group(process)
