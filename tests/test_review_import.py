@@ -95,6 +95,38 @@ class ImportTests(unittest.TestCase):
         with self.assertRaises(FileExistsError):
             self.run_import(validation)
 
+    def report(self, path):
+        return json.loads(Path(path).read_text())
+
+    def test_notes_state_the_actual_validation_coverage(self):
+        validation, _ = self.validation()
+        note = self.report(self.run_import(validation))["summary"]
+        self.assertIn("All 2 measured runs have a passed output check", note)
+        self.assertNotIn("Missing output checks", note)
+        self.out = self.root / "unvalidated"
+        self.assertIn("No measured run has a passed output check", self.report(self.run_import())["summary"])
+
+    def test_short_run_warning_survives_import(self):
+        for row in self.rows:
+            row["elapsed_ns"] = 5_000_000
+        self.save()
+        validation, _ = self.validation()
+        self.assertIn("under 100 ms", self.report(self.run_import(validation))["summary"])
+        self.out = self.root / "long-unvalidated"
+        # Excluded runs enter no statistics, so they raise no statistical caveat.
+        self.assertNotIn("under 100 ms", self.report(self.run_import())["summary"])
+
+    def test_identity_summarizes_the_manifest(self):
+        self.manifest.update(created_at_utc="2026-01-02T03:04:05+00:00",
+                             platform=dict(node="host", system="Linux", release="6", machine="x86_64"),
+                             git=dict(head="abc123", tracked_diff_sha256="d" * 64),
+                             load_average=[1.5, 1.0, 0.5], metadata=dict(build="release"))
+        self.save()
+        identity = self.report(self.run_import())["datasets"][0]["identity"]
+        for expected in ("2026-01-02", "host Linux 6 x86_64", "load 1.50", "abc123 with tracked changes",
+                         "build=release"):
+            self.assertIn(expected, identity)
+
     def test_shared_validation_artifact_is_hashed_and_linked_once_per_invocation(self):
         validation, _ = self.validation()
         evidence = self.root / "validation-results.json"

@@ -8,6 +8,8 @@ import hashlib
 import json
 from pathlib import Path
 import shlex
+import statistics
+import sys
 
 from review_data import SCHEMA, array, digest, text
 from review_observations import json_value, jsonl_rows, observations
@@ -160,19 +162,67 @@ def normalize_run(row, manifest, check, identity_valid, run_dir):
     return record
 
 
-def report_manifest(manifest, title, boundary, cohort, links):
+def validation_note(rows):
+    """State the output-check coverage this import actually has."""
+    measured = [row for row in rows if row["phase"] == "measured"]
+    passed = sum(row["validated"] for row in measured)
+    if not measured:
+        return "No measured runs were retained."
+    if passed == len(measured):
+        return f"All {passed} measured runs have a passed output check."
+    if not passed:
+        return ("No measured run has a passed output check, so none enter timing statistics; "
+                "they stay visible as outcomes.")
+    return (f"{passed} of {len(measured)} measured runs have a passed output check; "
+            "the others stay visible but excluded from timing statistics.")
+
+
+def short_run_note(rows):
+    """Carry the harness's short-run warning, which lives only in summary.json."""
+    medians = [statistics.median(elapsed) for elapsed in (
+        [row["elapsed_ns"] for row in rows if row["configuration"] == name and row["included"]]
+        for name in CONFIGURATIONS) if elapsed]
+    if medians and min(medians) < 100_000_000:
+        return ("A median is under 100 ms, where process startup and timer noise may dominate; "
+                "prefer the absolute saving to the percentage.")
+    return None
+
+
+def capture_identity(manifest):
+    """Summarize the recorded identity; the full manifest stays linked."""
+    platform = manifest.get("platform")
+    parts = [f"Captured {manifest.get('created_at_utc', 'at an unrecorded time')}"]
+    if isinstance(platform, dict):
+        parts.append("on " + " ".join(str(platform[key]) for key in ("node", "system", "release", "machine")
+                                      if platform.get(key)))
+    load = manifest.get("load_average")
+    if isinstance(load, list) and load:
+        parts.append(f"with 1-minute load {load[0]:.2f}")
+    git = manifest.get("git")
+    if isinstance(git, dict) and git.get("head"):
+        parts.append(f'at {git["head"]}' + (" with tracked changes" if git.get("tracked_diff_sha256") else ""))
+    metadata = manifest.get("metadata")
+    if isinstance(metadata, dict) and metadata:
+        parts.append("(" + ", ".join(f"{key}={value}" for key, value in sorted(metadata.items())) + ")")
+    return " ".join(parts) + "; source manifest and identity check linked below."
+
+
+def report_manifest(manifest, title, boundary, cohort, links, rows):
     # Exact argv is readable without discarding array-valued records in JSONL.
     command = "\n".join(f"{name}: {shlex.join(manifest['commands'][name]['argv'])}" for name in CONFIGURATIONS)
-    note = ("Imported retained evidence; no commands executed. Missing output checks leave runs "
-            "visible but excluded. Elapsed readings include harness overhead and, on timeout, "
+    note = (f"Imported retained evidence; no commands executed. {validation_note(rows)} "
+            "Elapsed readings include harness overhead and, on timeout, "
             "termination handling; the configured limit is a separate value.")
     if manifest.get("perf"):
         note += " This capture includes perf-stat overhead; it is instrumented evidence."
+    short = short_run_note(rows)
+    if short:
+        note += f" {short}"
     return dict(
         schema=SCHEMA, title=title, summary=note,
         datasets=[dict(id="commands", title=title, configurations=list(CONFIGURATIONS),
                        samples="observations.jsonl", boundary=boundary, cohort=cohort,
-                       identity="Source manifest and identity-check records linked below",
+                       identity=capture_identity(manifest),
                        command=command, expected_exit_status=manifest["expected_exit_code"])],
         baselines=[dict(id=f"base-{name}", title=f"{name}: recorded outcomes",
                         dataset="commands", configuration=name, note=note) for name in CONFIGURATIONS],
@@ -203,7 +253,7 @@ def import_comparison(run_dir, out, *, boundary, cohort, title="Command comparis
                  expected_exit_status=manifest["expected_exit_code"], boundary=boundary, cohort=cohort)
     snapshots["observations.jsonl"] = snapshot
     links = [dict(title=name, path=name) for name in snapshots if name != "observations.jsonl"] + links
-    report = report_manifest(manifest, title, boundary, cohort, links)
+    report = report_manifest(manifest, title, boundary, cohort, links, normalized)
     out.mkdir(parents=True)
     for name, raw in snapshots.items():
         (out / name).write_bytes(raw)
@@ -222,3 +272,4 @@ if __name__ == "__main__":
     args = parser.parse_args()
     print(import_comparison(args.run_dir, args.out, boundary=args.boundary,
                             cohort=args.cohort, title=args.title, validation=args.validation))
+    print("Curate report.json before sharing: see references/command-import.md.", file=sys.stderr)

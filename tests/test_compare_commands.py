@@ -271,6 +271,23 @@ class CompareCommandsTests(unittest.TestCase):
             self.assertIn("positive even number", result.stderr)
             self.assertFalse((cwd / "evidence").exists())
 
+    def test_identical_executables_warn_as_noise_even_at_different_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cwd = Path(temp_dir)
+            baseline = cwd / "baseline"
+            baseline.write_text("#!/bin/sh\necho same\n", encoding="utf-8")
+            baseline.chmod(0o755)
+            candidate = cwd / "candidate"
+            candidate.write_bytes(baseline.read_bytes())
+            candidate.chmod(0o755)
+            result = subprocess.run(
+                self.compare_command(baseline=[str(baseline)], candidate=[str(candidate)]),
+                cwd=cwd, capture_output=True, text=True, check=False, timeout=30,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            manifest = self.read_json(cwd / "evidence" / "manifest.json")
+            self.assertIn("any measured difference is noise", " ".join(manifest["warnings"]))
+
     def test_invalid_timeout_is_refused_before_launch_or_output(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             cwd = Path(temporary)
@@ -445,6 +462,9 @@ class CompareCommandsTests(unittest.TestCase):
             evidence = cwd / "evidence"
             manifest = self.read_json(evidence / "manifest.json")
             self.assertEqual(manifest["perf"]["version"], "perf version test-double")
+            self.assertEqual(len(manifest["load_average"]), 3)
+            self.assertIsNone(manifest["git"])
+            self.assertIn("no commit is recorded", " ".join(manifest["warnings"]))
             self.assertIn("perf stat wrapper", manifest["elapsed_measurement"]["scope"])
             self.assertIn(
                 "separate comparison without --perf-events",

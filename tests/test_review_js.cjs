@@ -85,7 +85,7 @@ test("group filters keep workload rows, their evidence and summary navigation to
     handlers.filter();
     assert.deepEqual([a.hidden,b.hidden,c.hidden], [false,true,true]);
     assert.deepEqual(details.map(d => d.hidden), [false,true,true,false]);
-    assert.equal(elements.count.textContent, "1 comparisons");
+    assert.equal(elements.count.textContent, "1 comparison");
   }
   elements["decision-filter"].value = "rejected";
   handlers["decision-filter"]();

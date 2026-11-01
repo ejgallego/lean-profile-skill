@@ -429,7 +429,7 @@ def render_page(model, out, template, plots=False):
 
     section("baselines", "Baseline", render_baselines(model["baselines"], plots))
     section("progress", "Summary of improvements", render_progress(model.get("progress"), model["comparisons"]))
-    section("attribution", "Phase attribution and profiles", attribution_html)
+    section("attribution", "Phase attribution and profiles" if model["profiles"] else "Attribution", attribution_html)
     methods = (
         "<p>Each workload is compared with its own control. Tables show median [IQR], full range and included n. Paired saving is control minus candidate within recorded rounds; positive is faster. These descriptive spreads are not confidence intervals. Decisions are supplied by the investigator.</p>"
         '<label for="filter">Find an experiment</label> <input id="filter" type="search"> '
@@ -450,7 +450,7 @@ def render_page(model, out, template, plots=False):
         (f'<details><summary>Source files, validation and reproduction links ({len(model["links"])})</summary><ul>{links}</ul></details>' if links else "")
         + '<p><a href="review-data.json">Statistics and provenance</a> · <a href="source-manifest.json">Original input manifest</a></p>'
     )
-    evidence += "<p>Each CSV or JSONL dataset is snapshotted once for all its contrasts. Profile files remain linked at their original locations; serve their common ancestor over HTTP. Perfetto opens its online UI and receives the selected trace locally in the browser. This builder runs no benchmarks and does not validate a trace’s internal structure.</p>"
+    evidence += "<p>Each CSV or JSONL dataset is snapshotted once for all its contrasts." + (" Profile files remain linked at their original locations; serve their common ancestor over HTTP. Perfetto opens its online UI and receives the selected trace locally in the browser. This builder runs no benchmarks and does not validate a trace’s internal structure." if model["profiles"] else "") + "</p>"
     datasets = render_datasets(model["datasets"])
     if datasets:
         evidence += '<details id="datasets"><summary>Multi-configuration overview</summary>' + datasets + '</details>'

@@ -99,6 +99,16 @@ class PresentationTests(unittest.TestCase):
         self.assertIn('No included measurements',page.visible)
         self.assertIn('warmup: 1 timeout',page.visible)
         self.assertIn('no paired estimate',page.visible.lower())
+    def test_profile_guidance_appears_only_with_profiles(self):
+        with_profiles=build_review.build(self.path,self.root/'with').read_text()
+        self.assertIn('Phase attribution and profiles',with_profiles)
+        self.assertIn('Perfetto opens its online UI',with_profiles)
+        del self.spec['profiles']
+        self.write()
+        without=build_review.build(self.path,self.root/'without').read_text()
+        self.assertIn('>Attribution</h2>',without)
+        self.assertNotIn('Perfetto opens its online UI',without)
+
     def test_baseline_precedes_progress_and_overview_is_in_evidence(self):
         page=Page(build_review.build(self.path,self.root/'out').read_text())
         self.assertLess(page.ids.index('baselines'),page.ids.index('progress'))

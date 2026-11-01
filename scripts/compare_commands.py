@@ -566,12 +566,33 @@ def main() -> int:
         preflight_warnings.append(warning)
         print(f"warning: {warning}", file=sys.stderr)
 
+    if (
+        baseline != candidate
+        and commands["baseline"]["executable_sha256"]
+        == commands["candidate"]["executable_sha256"]
+        and baseline[1:] == candidate[1:]
+    ):
+        warning = (
+            "Baseline and candidate run byte-identical executables with the same "
+            "arguments; any measured difference is noise."
+        )
+        preflight_warnings.append(warning)
+        print(f"warning: {warning}", file=sys.stderr)
+
     git, tracked_diff = git_identity(cwd)
+    if git is None:
+        warning = (
+            "The working directory is not a Git repository, so no commit is "
+            "recorded; pass each source tree's inputs with --artifact."
+        )
+        preflight_warnings.append(warning)
+        print(f"warning: {warning}", file=sys.stderr)
     manifest = {
         "schema": "lean-profile-compare-alpha",
         "created_at_utc": dt.datetime.now(dt.timezone.utc).isoformat(),
         "cwd": str(cwd),
         "platform": platform.uname()._asdict(),
+        "load_average": os.getloadavg() if hasattr(os, "getloadavg") else None,
         "python": sys.version,
         "commands": commands,
         "artifacts": artifacts,

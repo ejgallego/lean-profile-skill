@@ -18,7 +18,7 @@ function filter() {
       (decision !== "all" && card.dataset.decision !== decision);
     if (!card.hidden) count++;
   }
-  $("count").textContent = `${count} comparisons`;
+  $("count").textContent = `${count} comparison${count === 1 ? "" : "s"}`;
   for (const group of document.querySelectorAll(".comparison-group"))
     group.hidden = !Array.from(group.querySelectorAll(".comparison")).some(card => !card.hidden);
   for (const detail of document.querySelectorAll(".comparison-evidence"))

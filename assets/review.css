@@ -116,8 +116,11 @@ td {
   border-bottom: 1px solid #ddd;
   text-align: left;
   vertical-align: top;
+  /* `anywhere` would let columns shrink until words split; .scroll handles width. */
+  overflow-wrap: break-word;
 }
 th {
+  white-space: nowrap;
   background: #f4f4f4;
   border-top: 1px solid #999;
   border-bottom: 1px solid #999;
