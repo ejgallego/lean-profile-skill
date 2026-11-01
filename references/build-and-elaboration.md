@@ -42,12 +42,15 @@ Declare whether the artifact cache is part of the workload, because the two clai
 need opposite controls:
 
 - A public edit-to-output claim with the cache on includes its hits. They are what
-  the user experiences, so record them rather than engineering them away.
-- A local rebuild or compile-cost claim needs each sample to start from a reproducibly
-  fresh state, such as a fresh worktree or an empty isolated `LAKE_CACHE_DIR`. Lake's
-  `--no-cache` does not provide this: it stops package build-cache downloads, while
-  local artifact reuse follows `enableArtifactCache`. Check this on the pinned
-  toolchain.
+  the user experiences, so preseed or freeze the declared cache state and retain the
+  hits rather than engineering them away.
+- A compile-cost claim that excludes the cache needs a reproducibly fresh build state
+  and a fresh empty cache for every sample, or a pinned-toolchain method that disables
+  artifact-cache reads. Neither half is enough alone: a fresh worktree still reads the
+  toolchain or system cache unless `LAKE_CACHE_DIR` is isolated, an empty cache leaves
+  `.lake/build` outputs in place, and one cache for a whole campaign is no longer empty
+  after its first sample. Lake's `--no-cache` does not help: it stops package
+  build-cache downloads, while local artifact reuse follows `enableArtifactCache`.
 
 Hits are silent. With a shared cache, a second identical line shift restores the
 importers, and a new field whose name never reaches the C restores the C objects, even
@@ -85,10 +88,11 @@ Project-clean with dependencies warm, dependency-clean, first bootstrap with
 network acquisition, and OS-cold are distinct workloads. Do not clear shared
 caches to manufacture cold runs; use isolated caches/artifact directories when
 needed and describe the achievable boundary. A project with
-`enableArtifactCache` can otherwise answer a repeated edit from the shared cache;
-set `LAKE_CACHE_DIR` to a directory inside the campaign so samples neither read nor
-fill the user's cache. It grows with every build, reaching several gigabytes in one
-short campaign. It is not evidence, so delete it when the campaign ends.
+`enableArtifactCache` can otherwise answer a repeated edit from the shared cache, so
+keep `LAKE_CACHE_DIR` inside the campaign, where samples neither read nor fill the
+user's cache, and use a new one per sample when the cache is excluded. It grows with
+every build, reaching several gigabytes in one short campaign. It is not evidence, so
+delete it when the campaign ends.
 
 ## Attribute without conflating phases
 

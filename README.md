@@ -13,12 +13,18 @@ which would leave behind files that commit removed:
 ```bash
 # ~/.claude/skills for Claude Code (or .claude/skills/ to scope it to a repository),
 # ~/.codex/skills for Codex.
-skills=~/.claude/skills
-stage=$(mktemp -d "$skills/.lean-profile-skill.XXXXXX")
-git archive HEAD | tar -x -C "$stage"
-test -f "$stage/SKILL.md"
-rm -rf -- "$skills/lean-profile-skill"
-mv "$stage" "$skills/lean-profile-skill"
+(
+  set -euo pipefail
+  skills=~/.claude/skills
+  mkdir -p -- "$skills"
+  stage=$(mktemp -d "$skills/.lean-profile-skill.XXXXXX")
+  trap 'rm -rf -- "$stage"' EXIT
+  git archive HEAD | tar -x -C "$stage"
+  test -f "$stage/SKILL.md"
+  rm -rf -- "$skills/lean-profile-skill"
+  mv -- "$stage" "$skills/lean-profile-skill"
+  trap - EXIT
+)
 ```
 
 Claude Code loads it when a task matches the description, or directly with

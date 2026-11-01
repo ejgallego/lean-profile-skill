@@ -310,10 +310,12 @@ failure, and interruption. An interrupted run exits 130 after recording its row
 and final identity check. On POSIX systems, timeout and interruption terminate
 the command's process group so descendant work does not contaminate later runs.
 Use a finite, positive `--timeout-seconds` to bound each invocation; omit it for
-no harness deadline. A blocking waiter removes the length-dependent polling delay of
-older captures, which added up to 50 ms, so treat short runs in captures that set
-`--timeout-seconds` before this fix with that in mind; launch, the waiter and cleanup
-remain harness overhead. Timeout and interrupt cleanup reach the process group on
+no harness deadline. Where the platform has `os.pidfd_open`, exit is observed without
+polling. That removes the length-dependent delay of older captures, which added up to
+50 ms, so treat short runs in captures that set `--timeout-seconds` before this fix with
+that in mind. Elsewhere, including macOS, a deadline still polls: the manifest records
+this as `elapsed_measurement.exit_observation`, and it does not apply without a
+deadline. Launch and cleanup remain harness overhead. Timeout and interrupt cleanup reach the process group on
 POSIX, not descendants that deliberately start a new session, and only the direct
 process on Windows. See [command-import.md](command-import.md#summary-conventions)
 for summary field names and the shared positive-means-faster convention.
