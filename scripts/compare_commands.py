@@ -17,7 +17,7 @@ import statistics
 import subprocess
 import sys
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -242,9 +242,18 @@ def signal_group(process: subprocess.Popen[bytes], signal_number: int) -> bool:
     return True
 
 
+def direct_signal(action: Callable[[], None]) -> str | None:
+    try:
+        action()
+    except OSError as error:
+        return f"direct signal failed: {error}"
+    return None
+
+
 def terminate_process_group(process: subprocess.Popen[bytes]) -> str | None:
     """Stop the child within a bound, returning what cleanup could not establish."""
     delivered = True
+    failure = None
     if os.name == "posix":
         # The unreaped root reserves the group ID until the final signal.
         delivered = signal_group(process, signal.SIGTERM)
@@ -253,15 +262,17 @@ def terminate_process_group(process: subprocess.Popen[bytes]) -> str | None:
         if process.returncode is None:
             delivered = signal_group(process, signal.SIGKILL) and delivered
     elif process.poll() is None:
-        process.terminate()
+        failure = direct_signal(process.terminate)
         try:
             process.wait(timeout=0.2)
         except subprocess.TimeoutExpired:
-            process.kill()
+            failure = direct_signal(process.kill) or failure
     try:
         process.wait(timeout=CLEANUP_SECONDS)
     except subprocess.TimeoutExpired:
-        process.kill()
+        failure = direct_signal(process.kill) or failure
+        if failure:
+            return f"process may still be running; {failure}"
         try:
             process.wait(timeout=CLEANUP_SECONDS)
         except subprocess.TimeoutExpired:
@@ -269,7 +280,7 @@ def terminate_process_group(process: subprocess.Popen[bytes]) -> str | None:
         return "process group outlived its signals; killed the root process only"
     if not delivered:
         return "process-group signal denied; descendants may have survived"
-    return None
+    return failure
 
 
 def fallback_observation(timeout_seconds: float | None) -> str:

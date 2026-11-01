@@ -119,10 +119,37 @@ class WaitForExitTests(unittest.TestCase):
         with mock.patch.object(compare_commands.os, "killpg", side_effect=PermissionError):
             self.assertIsNone(compare_commands.terminate_process_group(process))
 
-    def capture(self, cwd: Path, **patches: object) -> tuple[int, Path]:
+    @unittest.skipUnless(os.name == "posix", "process groups are POSIX-specific")
+    def test_denied_group_and_direct_signals_are_bounded_and_reported(self) -> None:
+        process = self.spawn("sleep", "30")
+        started = time.monotonic()
+        with mock.patch.object(compare_commands.os, "killpg", side_effect=PermissionError), \
+                mock.patch.object(process, "kill", side_effect=PermissionError("direct denied")), \
+                mock.patch.object(compare_commands, "CLEANUP_SECONDS", 0.02):
+            error = compare_commands.terminate_process_group(process)
+        self.assertIn("process may still be running", error)
+        self.assertIn("direct denied", error)
+        self.assertLess(time.monotonic() - started, 5)
+
+    @unittest.skipUnless(os.name == "posix", "process groups are POSIX-specific")
+    def test_capture_preserves_a_cleanup_failure_as_a_failed_run(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with mock.patch.object(compare_commands.os, "killpg", side_effect=PermissionError), \
+                    mock.patch.object(subprocess.Popen, "kill", side_effect=PermissionError("denied")):
+                status, evidence = self.capture(Path(temp_dir), command='["sleep", "1"]', deadline="0.05",
+                                                CLEANUP_SECONDS=0.02)
+            self.assertNotEqual(status, 0)
+            row = json.loads((evidence / "runs.jsonl").read_text().splitlines()[0])
+            self.assertTrue(row["timed_out"])
+            self.assertIsNone(row["exit_code"])
+            self.assertIn("process may still be running", row["evidence_error"])
+            self.assertTrue((evidence / "identity-check.json").is_file())
+
+    def capture(self, cwd: Path, *, command: str = '["true"]', deadline: str = "30",
+                **patches: object) -> tuple[int, Path]:
         """Run the real entry point in-process so a fault can be injected."""
-        argv = ["compare_commands.py", "--baseline", '["true"]', "--candidate", '["sh", "-c", "true"]',
-                "--out-dir", str(cwd / "evidence"), "--timeout-seconds", "30"]
+        argv = ["compare_commands.py", "--baseline", command, "--candidate", '["sh", "-c", "true"]',
+                "--out-dir", str(cwd / "evidence"), "--timeout-seconds", deadline]
         with mock.patch.object(sys, "argv", argv), mock.patch("sys.stdout"), mock.patch("sys.stderr"), \
                 mock.patch.multiple(compare_commands, **patches):
             return compare_commands.main(), cwd / "evidence"
