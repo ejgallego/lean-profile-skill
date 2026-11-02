@@ -206,6 +206,15 @@ class OutputWarningTests(unittest.TestCase):
         self.assertEqual(len(warnings), 1)
         self.assertIn("Baseline stdout varies", warnings[0])
 
+    def test_both_sides_varying_over_the_same_hashes_are_both_reported(self) -> None:
+        warnings = compare_commands.output_warnings(self.rows(["a", "b"], ["b", "a"]))
+        self.assertEqual(len(warnings), 2)
+
+    def test_missing_hashes_or_side_report_nothing(self) -> None:
+        self.assertEqual(compare_commands.output_warnings(self.rows([], ["a"])), [])
+        rows = [dict(phase="measured", label="baseline")] + self.rows([], ["a"])
+        self.assertEqual(compare_commands.output_warnings(rows), [])
+
     def test_warmups_do_not_count(self) -> None:
         rows = self.rows(["a"], ["a"]) + [dict(phase="warmup", label="candidate", stdout_sha256="b")]
         self.assertEqual(compare_commands.output_warnings(rows), [])

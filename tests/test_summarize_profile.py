@@ -126,7 +126,7 @@ class SummarizeTests(unittest.TestCase):
         names = ["start_thread", "lp_work", "0xffffffffbab57341"]
         rows = [(None, 0), (0, 1), (1, 2)]
         threads = [dict(thread(names, rows, [2] * 40), name="tally", tid=1),
-                   dict(thread(names, [(None, 1)], [0] * 30), name="samply", tid=2),
+                   dict(thread(names, [(None, 1)], [0] * 30), name="samply", pid=9, tid=9),
                    dict(thread(names, [(None, 2)], [0] * 30), name="iou-sqp-9", tid=3)]
         return dict(meta=dict(product="tally", interval=1.0), shared=dict(stringArray=names),
                     threads=threads)
@@ -138,6 +138,17 @@ class SummarizeTests(unittest.TestCase):
         self.assertFalse(any("thread entry" in warning for warning in result["warnings"]))
         text = tool.render(result)
         self.assertIn("excluded 60 weight: iou-sqp-9, samply", text)
+
+    def test_target_owned_io_uring_poller_stays_in_the_totals(self):
+        for profiler in (False, True):
+            profile = self.profiler_capture()
+            profile["threads"][2]["name"] = "iou-sqp-100"
+            if not profiler:
+                del profile["threads"][1]
+            result = self.summary(profile)
+            self.assertEqual(result["total"], 70)
+            self.assertTrue(next(row for row in result["threads"]
+                                 if row["name"] == "iou-sqp-100")["selected"])
 
     def test_a_profiler_thread_can_still_be_selected(self):
         self.assertEqual(self.summary(self.profiler_capture(), thread="samply")["total"], 30)

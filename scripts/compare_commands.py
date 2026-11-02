@@ -537,14 +537,15 @@ def output_warnings(rows: list[dict[str, Any]]) -> list[str]:
     """Report stdout differences; matching output is still not a correctness check."""
     outputs: dict[str, set[str]] = {"baseline": set(), "candidate": set()}
     for row in rows:
-        if row["phase"] == "measured":
+        # Older captures have no hash, and a partial capture can lack a side.
+        if row["phase"] == "measured" and row.get("stdout_sha256"):
             outputs[row["label"]].add(row["stdout_sha256"])
     warnings = [
         f"{label.capitalize()} stdout varies between runs, so it cannot be compared by bytes."
         for label, hashes in outputs.items()
         if len(hashes) > 1
     ]
-    if not warnings and outputs["baseline"] != outputs["candidate"]:
+    if not warnings and all(outputs.values()) and outputs["baseline"] != outputs["candidate"]:
         warnings.append(
             "Baseline and candidate stdout differ; confirm that the change is intended "
             "before reading the timings as an improvement."

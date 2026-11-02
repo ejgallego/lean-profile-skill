@@ -127,6 +127,21 @@ class ImportTests(unittest.TestCase):
         self.out = self.root / "matching"
         self.assertNotIn("stdout differ", self.report(self.run_import())["summary"])
 
+    def test_varying_stdout_survives_import(self):
+        extra = [dict(row, sequence=row["sequence"] + 2, slot=row["slot"] + 2,
+                      **{"pass": 2}) for row in self.rows]
+        self.rows += extra
+        for row, digest in zip(self.rows, "abba"):
+            row["stdout_sha256"] = digest * 64
+        self.save()
+        summary = self.report(self.run_import())["summary"]
+        self.assertIn("Baseline stdout varies", summary)
+        self.assertIn("Candidate stdout varies", summary)
+        self.assertNotIn("stdout differ", summary)
+
+    def test_captures_without_stdout_hashes_still_import(self):
+        self.assertNotIn("stdout", self.report(self.run_import())["summary"])
+
     def test_identity_summarizes_the_manifest(self):
         self.manifest.update(created_at_utc="2026-01-02T03:04:05+00:00",
                              platform=dict(node="host", system="Linux", release="6", machine="x86_64"),

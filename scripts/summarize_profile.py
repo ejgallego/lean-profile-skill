@@ -13,8 +13,7 @@ import sys
 
 UNKNOWN = re.compile(r"0x[0-9a-fA-F]+\Z|\[unknown\]\Z")
 KERNEL = re.compile(r"0xffff[0-9a-fA-F]{12}\Z")
-# The profiler and kernel helpers, not the workload. Selecting one by name includes it.
-AUXILIARY = re.compile(r"samply\Z|iou-sqp-")
+SQPOLL = re.compile(r"iou-sqp-(\d+)\Z")
 # Frames that end a complete user-space stack.
 # A thread at or above this share of the weight gets its own stack-quality check,
 # provided it has enough weight for a percentage to mean anything.
@@ -102,6 +101,20 @@ def read_profile(path):
     return read_firefox(raw) if raw.lstrip()[:1] == b"{" else read_perf_script(raw.decode())
 
 
+def profiler_thread(item, threads):
+    """Name samply's own threads. Selecting one by name or TID still includes it.
+
+    An io_uring poller may belong to the target, so it counts only when its ID
+    ties it to a samply thread in this capture.
+    """
+    if item["name"] == "samply":
+        return True
+    poller = SQPOLL.match(str(item["name"]))
+    return bool(poller) and any(
+        other["name"] == "samply" and poller.group(1) in (str(other["pid"]), str(other["tid"]))
+        for other in threads)
+
+
 def summarize(threads, source="profile", *, top=15, thread=None, tid=None):
     self_time, inclusive, chains, depths = Counter(), Counter(), Counter(), Counter()
     summaries = []
@@ -110,7 +123,7 @@ def summarize(threads, source="profile", *, top=15, thread=None, tid=None):
                 if (thread is None or thread in str(item["name"]))
                 and (tid is None or tid == str(item["tid"]))]
     if thread is None and tid is None:
-        selected = [item for item in selected if not AUXILIARY.match(str(item["name"]))] or selected
+        selected = [item for item in selected if not profiler_thread(item, threads)] or selected
     trace = any(item["weight_type"].startswith("tracing") for item in selected)
     for item in threads:
         weight = thread_rooted = thread_unknown = 0

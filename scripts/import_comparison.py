@@ -11,6 +11,7 @@ import shlex
 import statistics
 import sys
 
+from compare_commands import output_warnings
 from review_data import SCHEMA, array, digest, text
 from review_observations import json_value, jsonl_rows, observations
 
@@ -188,16 +189,6 @@ def short_run_note(rows):
     return None
 
 
-def output_note(rows):
-    """Carry stdout differences into the report, which never reads summary.json."""
-    measured = [row for row in rows if row["phase"] == "measured" and row.get("stdout_sha256")]
-    outputs = {name: {row["stdout_sha256"] for row in measured if row["configuration"] == name}
-               for name in CONFIGURATIONS}
-    if not all(outputs.values()) or outputs["baseline"] == outputs["candidate"]:
-        return None
-    return "Baseline and candidate stdout differ across the measured runs."
-
-
 def capture_identity(manifest):
     """Summarize the recorded identity; the full manifest stays linked."""
     platform = manifest.get("platform")
@@ -225,7 +216,8 @@ def report_manifest(manifest, title, boundary, cohort, links, rows):
             "termination handling; the configured limit is a separate value.")
     if manifest.get("perf"):
         note += " This capture includes perf-stat overhead; it is instrumented evidence."
-    for extra in (output_note(rows), short_run_note(rows)):
+    # Reports never read summary.json, so carry its output warnings here.
+    for extra in (*output_warnings(rows), short_run_note(rows)):
         if extra:
             note += f" {extra}"
     return dict(
