@@ -27,6 +27,9 @@ which would leave behind files that commit removed:
 )
 ```
 
+The archive keeps the runtime skill, examples, credits, and license while omitting
+repository-only CI configuration, eval fixtures, and tests.
+
 Claude Code loads it when a task matches the description, or directly with
 `/lean-profile-skill`. Native sampling depends on the host: `samply` and `lake samply`
 typically need `perf_event_paranoid` at 1 or lower, while `perf` often works at the

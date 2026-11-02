@@ -28,6 +28,15 @@ jobs:
           python3 -B scripts/import_comparison.py --help
           python3 -B scripts/check_outputs.py --help
           python3 -B scripts/summarize_profile.py --help
+      - name: Check install archive boundary
+        run: |
+          archive=$(mktemp -d)
+          git archive HEAD | tar -x -C "$archive"
+          test -f "$archive/SKILL.md"
+          test -f "$archive/LICENSE"
+          test ! -e "$archive/.github"
+          test ! -e "$archive/evals"
+          test ! -e "$archive/tests"
       - name: Test browser handoff without external dependencies
         run: node --test tests/test_review_js.cjs
       - name: Check report entrypoint and synthetic demo
