@@ -116,6 +116,17 @@ class ImportTests(unittest.TestCase):
         # Excluded runs enter no statistics, so they raise no statistical caveat.
         self.assertNotIn("under 100 ms", self.report(self.run_import())["summary"])
 
+    def test_stdout_difference_survives_import(self):
+        for row, digest in zip(self.rows, "ab"):
+            row["stdout_sha256"] = digest * 64
+        self.save()
+        self.assertIn("stdout differ", self.report(self.run_import())["summary"])
+        for row in self.rows:
+            row["stdout_sha256"] = "a" * 64
+        self.save()
+        self.out = self.root / "matching"
+        self.assertNotIn("stdout differ", self.report(self.run_import())["summary"])
+
     def test_identity_summarizes_the_manifest(self):
         self.manifest.update(created_at_utc="2026-01-02T03:04:05+00:00",
                              platform=dict(node="host", system="Linux", release="6", machine="x86_64"),

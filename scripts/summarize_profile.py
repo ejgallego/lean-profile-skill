@@ -12,9 +12,14 @@ import re
 import sys
 
 UNKNOWN = re.compile(r"0x[0-9a-fA-F]+\Z|\[unknown\]\Z")
+KERNEL = re.compile(r"0xffff[0-9a-fA-F]{12}\Z")
+# The profiler and kernel helpers, not the workload. Selecting one by name includes it.
+AUXILIARY = re.compile(r"samply\Z|iou-sqp-")
 # Frames that end a complete user-space stack.
-# A thread at or above this share of the weight gets its own stack-quality check.
+# A thread at or above this share of the weight gets its own stack-quality check,
+# provided it has enough weight for a percentage to mean anything.
 MATERIAL_SHARE = 0.1
+MINIMUM_THREAD_WEIGHT = 20
 THREAD_ENTRY = re.compile(r"(?:^|_)start\Z|_libc_start|start_thread\Z|clone3?\Z")
 
 
@@ -53,7 +58,8 @@ def firefox_rows(thread, shared):
     for stack, weight in totals.items():
         chain = []
         while stack is not None:
-            chain.append(strings[funcs["name"][frames["func"][stacks["frame"][stack]]]])
+            name = strings[funcs["name"][frames["func"][stacks["frame"][stack]]]]
+            chain.append("[kernel]" if KERNEL.match(name) else name)
             stack = stacks["prefix"][stack]
         yield weight, chain
 
@@ -103,6 +109,8 @@ def summarize(threads, source="profile", *, top=15, thread=None, tid=None):
     selected = [item for item in threads
                 if (thread is None or thread in str(item["name"]))
                 and (tid is None or tid == str(item["tid"]))]
+    if thread is None and tid is None:
+        selected = [item for item in selected if not AUXILIARY.match(str(item["name"]))] or selected
     trace = any(item["weight_type"].startswith("tracing") for item in selected)
     for item in threads:
         weight = thread_rooted = thread_unknown = 0
@@ -135,14 +143,17 @@ def summarize(threads, source="profile", *, top=15, thread=None, tid=None):
         warnings.append("Most leaf frames are unsymbolicated addresses. Only `lake samply` output "
                         "is symbolicated in the file; use `perf script` for other captures.")
     if not trace:
+        remedy = ("prefer `lake samply` stacks where sampling is permitted, or confirm callers with "
+                  "a debugger census." if source == "perf script"
+                  else "confirm callers with a debugger census.")
         # Well-rooted helpers must not hide broken stacks on the thread doing the work.
         for row in summaries:
-            if row["selected"] and row["weight"] >= MATERIAL_SHARE * total and row["rooted_percent"] < 50:
+            material = row["weight"] >= max(MATERIAL_SHARE * total, MINIMUM_THREAD_WEIGHT)
+            if row["selected"] and material and row["rooted_percent"] < 50:
                 warnings.append(f'Thread {row["name"]} (tid {row["tid"]}) carries {row["weight"]} of '
                                 f'{total} weight, but only {row["rooted_percent"]:.1f}% of it reaches '
                                 "a thread entry, so its caller frames may be missing or skipped even "
-                                "when every name looks valid. Trust self time; confirm callers with "
-                                "a debugger census.")
+                                f"when every name looks valid. Trust self time; {remedy}")
 
     def table(counter):
         # Name breaks ties: frame sets iterate in per-process hash order.
@@ -157,6 +168,10 @@ def summarize(threads, source="profile", *, top=15, thread=None, tid=None):
                 self=table(self_time), inclusive=table(inclusive), stacks=table(chains))
 
 
+def thread_id(row):
+    return f'tid {row["tid"]}' if row["pid"] is None else f'pid {row["pid"]}, tid {row["tid"]}'
+
+
 def render(summary):
     lines = [f'{summary["source"]}, weight {summary["total"]}: unknown leaf frames '
              f'{summary["unknown_leaf_percent"]:.1f}%, stacks reaching a thread entry '
@@ -164,8 +179,12 @@ def render(summary):
     lines += [f'warning: {warning}' for warning in summary["warnings"]]
     lines.append("threads (confirm the intended workers carry the weight and reach an entry):")
     lines += [f'  {row["weight"]:>8}  rooted {row["rooted_percent"]:5.1f}%  unknown '
-              f'{row["unknown_leaf_percent"]:5.1f}%  {row["name"]} (pid {row["pid"]}, tid {row["tid"]})'
-              for row in summary["threads"] if row["weight"]]
+              f'{row["unknown_leaf_percent"]:5.1f}%  {row["name"]} ({thread_id(row)})'
+              for row in summary["threads"] if row["weight"] and row["selected"]]
+    excluded = [row for row in summary["threads"] if row["weight"] and not row["selected"]]
+    if excluded:
+        names = ", ".join(sorted({str(row["name"]) for row in excluded}))
+        lines.append(f'  excluded {sum(row["weight"] for row in excluded)} weight: {names}')
     for key, heading in (("self", "self"), ("inclusive", "inclusive"), ("stacks", "top stacks, leaf first")):
         lines.append(f"{heading}:")
         lines += [f'  {row["percent"]:6.2f}%  {row["name"]}' for row in summary[key]]

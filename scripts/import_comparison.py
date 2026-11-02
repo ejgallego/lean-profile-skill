@@ -188,6 +188,16 @@ def short_run_note(rows):
     return None
 
 
+def output_note(rows):
+    """Carry stdout differences into the report, which never reads summary.json."""
+    measured = [row for row in rows if row["phase"] == "measured" and row.get("stdout_sha256")]
+    outputs = {name: {row["stdout_sha256"] for row in measured if row["configuration"] == name}
+               for name in CONFIGURATIONS}
+    if not all(outputs.values()) or outputs["baseline"] == outputs["candidate"]:
+        return None
+    return "Baseline and candidate stdout differ across the measured runs."
+
+
 def capture_identity(manifest):
     """Summarize the recorded identity; the full manifest stays linked."""
     platform = manifest.get("platform")
@@ -215,9 +225,9 @@ def report_manifest(manifest, title, boundary, cohort, links, rows):
             "termination handling; the configured limit is a separate value.")
     if manifest.get("perf"):
         note += " This capture includes perf-stat overhead; it is instrumented evidence."
-    short = short_run_note(rows)
-    if short:
-        note += f" {short}"
+    for extra in (output_note(rows), short_run_note(rows)):
+        if extra:
+            note += f" {extra}"
     return dict(
         schema=SCHEMA, title=title, summary=note,
         datasets=[dict(id="commands", title=title, configurations=list(CONFIGURATIONS),

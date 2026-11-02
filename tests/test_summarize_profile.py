@@ -118,9 +118,45 @@ class SummarizeTests(unittest.TestCase):
         self.assertEqual({row["tid"] for row in result["threads"]}, {"42", "43"})
 
     def test_clean_looking_truncated_stacks_are_flagged(self):
-        result = self.perf("tally  42 \n\t  10 lean_copy_expand_array\n\t  20 lp_tally_run\n\n")
+        result = self.perf("tally  42 \n\t  10 lean_copy_expand_array\n\t  20 lp_tally_run\n\n" * 25)
         self.assertEqual(result["unknown_leaf_percent"], 0.0)
         self.assertTrue(any("reaches a thread entry" in warning for warning in result["warnings"]))
+
+    def profiler_capture(self):
+        names = ["start_thread", "lp_work", "0xffffffffbab57341"]
+        rows = [(None, 0), (0, 1), (1, 2)]
+        threads = [dict(thread(names, rows, [2] * 40), name="tally", tid=1),
+                   dict(thread(names, [(None, 1)], [0] * 30), name="samply", tid=2),
+                   dict(thread(names, [(None, 2)], [0] * 30), name="iou-sqp-9", tid=3)]
+        return dict(meta=dict(product="tally", interval=1.0), shared=dict(stringArray=names),
+                    threads=threads)
+
+    def test_profiler_threads_stay_out_of_tables_and_warnings(self):
+        result = self.summary(self.profiler_capture())
+        self.assertEqual(result["total"], 40)
+        self.assertEqual(result["rooted_stack_percent"], 100.0)
+        self.assertFalse(any("thread entry" in warning for warning in result["warnings"]))
+        text = tool.render(result)
+        self.assertIn("excluded 60 weight: iou-sqp-9, samply", text)
+
+    def test_a_profiler_thread_can_still_be_selected(self):
+        self.assertEqual(self.summary(self.profiler_capture(), thread="samply")["total"], 30)
+
+    def test_thread_table_matches_the_selection(self):
+        text = tool.render(self.summary(self.profiler_capture(), tid="1"))
+        self.assertNotIn(" samply (", text)
+
+    def test_kernel_addresses_are_labeled(self):
+        result = self.summary(self.profiler_capture())
+        self.assertEqual(result["self"][0]["name"], "[kernel]")
+        self.assertEqual(result["unknown_leaf_percent"], 0.0)
+
+    def test_tiny_threads_do_not_warn_and_perf_points_to_samply(self):
+        tiny = self.perf("tally  42 \n\t  10 lean_copy_expand_array\n\t  20 lp_tally_run\n\n")
+        self.assertFalse(any("reaches a thread entry" in warning for warning in tiny["warnings"]))
+        large = self.perf("tally  42 \n\t  10 lean_copy_expand_array\n\t  20 lp_tally_run\n\n" * 25)
+        self.assertTrue(any("prefer `lake samply`" in warning for warning in large["warnings"]))
+        self.assertNotIn("pid None", tool.render(large))
 
     def test_lean_trace_scopes_are_not_presented_as_samples(self):
         result = self.summary(self.profile([2], weight=[7.5], weightType="tracing-ms"))

@@ -20,6 +20,10 @@ import compare_commands
 from compare_commands import summarize_comparison, wait_for_exit, write_json
 
 
+def sha256_text(text: str) -> str:
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
 class WaitForExitTests(unittest.TestCase):
     def spawn(self, *argv: str) -> subprocess.Popen[bytes]:
         process = subprocess.Popen(list(argv), start_new_session=True)
@@ -182,6 +186,29 @@ class WaitForExitTests(unittest.TestCase):
                 await_exit_unreaped=mock.Mock(return_value=None))
             manifest = json.loads((evidence / "manifest.json").read_text())
             self.assertIn("cannot observe exit without polling", " ".join(manifest["warnings"]))
+
+
+class OutputWarningTests(unittest.TestCase):
+    def rows(self, baseline: list[str], candidate: list[str]) -> list[dict[str, str]]:
+        return [dict(phase="measured", label=label, stdout_sha256=digest)
+                for label, digests in (("baseline", baseline), ("candidate", candidate))
+                for digest in digests]
+
+    def test_matching_outputs_stay_quiet(self) -> None:
+        self.assertEqual(compare_commands.output_warnings(self.rows(["a", "a"], ["a", "a"])), [])
+
+    def test_arm_difference_is_reported(self) -> None:
+        warnings = compare_commands.output_warnings(self.rows(["a"], ["b"]))
+        self.assertIn("stdout differ", " ".join(warnings))
+
+    def test_varying_output_says_bytes_cannot_compare(self) -> None:
+        warnings = compare_commands.output_warnings(self.rows(["a", "b"], ["a"]))
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("Baseline stdout varies", warnings[0])
+
+    def test_warmups_do_not_count(self) -> None:
+        rows = self.rows(["a"], ["a"]) + [dict(phase="warmup", label="candidate", stdout_sha256="b")]
+        self.assertEqual(compare_commands.output_warnings(rows), [])
 
 
 class CompareCommandsTests(unittest.TestCase):
@@ -367,6 +394,8 @@ class CompareCommandsTests(unittest.TestCase):
                              [measured[p, "baseline"] - measured[p, "candidate"]
                               for p in (1, 2)])
             self.assertIn("screening evidence", " ".join(summary["warnings"]))
+            self.assertIn("Baseline and candidate stdout differ", " ".join(summary["warnings"]))
+            self.assertEqual(rows[0]["stdout_sha256"], sha256_text("baseline-output\n"))
 
             baseline_stdout = evidence / str(rows[0]["stdout"])
             candidate_stdout = evidence / str(rows[1]["stdout"])

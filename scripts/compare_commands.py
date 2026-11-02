@@ -463,6 +463,7 @@ def execute_run(
             stderr.write((evidence_error + "\n").encode())
 
     elapsed_ns = time.perf_counter_ns() - started_ns
+    stdout_sha256 = sha256_file(stdout_path)
     row = {
         "sequence": sequence,
         "phase": phase,
@@ -479,6 +480,7 @@ def execute_run(
         "evidence_error": evidence_error,
         "exit_observation": exit_observation,
         "stdout": str(stdout_path.relative_to(context.out_dir)),
+        "stdout_sha256": stdout_sha256,
         "stderr": str(stderr_path.relative_to(context.out_dir)),
         "perf_stat": (
             str(counter_path.relative_to(context.out_dir)) if counter_path else None
@@ -529,6 +531,25 @@ def summarize_comparison(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "paired_saving_median_ns": statistics.median(savings),
         "paired_savings_ns": savings,
     }
+
+
+def output_warnings(rows: list[dict[str, Any]]) -> list[str]:
+    """Report stdout differences; matching output is still not a correctness check."""
+    outputs: dict[str, set[str]] = {"baseline": set(), "candidate": set()}
+    for row in rows:
+        if row["phase"] == "measured":
+            outputs[row["label"]].add(row["stdout_sha256"])
+    warnings = [
+        f"{label.capitalize()} stdout varies between runs, so it cannot be compared by bytes."
+        for label, hashes in outputs.items()
+        if len(hashes) > 1
+    ]
+    if not warnings and outputs["baseline"] != outputs["candidate"]:
+        warnings.append(
+            "Baseline and candidate stdout differ; confirm that the change is intended "
+            "before reading the timings as an improvement."
+        )
+    return warnings
 
 
 def comparison_schedule(
@@ -802,6 +823,7 @@ def main() -> int:
         warnings.append(
             "Two passes are one AB/BA cycle and should be treated as screening evidence."
         )
+    warnings.extend(output_warnings(rows))
     summary.update(identity_check=identity_check, warnings=warnings)
     write_json(out_dir / "summary.json", summary)
     print(json.dumps(summary, indent=2, sort_keys=True))
