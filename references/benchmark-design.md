@@ -143,12 +143,13 @@ For history sweeps:
 
 ## Evidence Bundle
 
-A landing-quality bundle should contain:
+This is the canonical reporting list; other references add to it rather than replace
+it. A landing-quality bundle should contain:
 
 1. identity metadata and raw runs;
 2. endpoint/status validation;
 3. diagnostics-off, order-balanced representative before/after results;
-4. secondary counters with their event and inheritance policy;
+4. secondary counters with their event and whether they follow spawned threads;
 5. pre- and post-change sampled profile summaries;
 6. generated C/IR evidence for ownership or allocation claims;
 7. executable and hot-symbol size deltas for code-shape changes;

@@ -14,6 +14,7 @@ Use this reference for the concrete mechanics of profiling Lean executables.
 - Controlled Windows
 - Post-change Verification
 - Reporting
+- Harness Behavior
 
 ## Backend Preflight
 
@@ -88,7 +89,7 @@ For a supported pinned toolchain and a `lean_exe` target, use a fresh output
 path and `--no-serve` for unattended capture:
 
 ```bash
-profile_run_dir="_out/performance/baseline-001"
+profile_run_dir="_out/performance/<campaign>/baseline-001"
 test ! -e "$profile_run_dir"
 mkdir -p "$profile_run_dir"
 
@@ -187,7 +188,7 @@ failed in practice because it tends to identify symptoms rather than the
 compiler/runtime ownership path that caused them.
 
 ```bash
-profile_run_dir="_out/performance/baseline-001"
+profile_run_dir="_out/performance/<campaign>/baseline-001"
 test ! -e "$profile_run_dir"
 mkdir -p "$profile_run_dir"
 
@@ -283,7 +284,7 @@ python3 "$skill_dir/scripts/compare_commands.py" \
   --metadata build=release \
   --metadata diagnostics=off \
   --passes 2 --warmups 1 \
-  --out-dir _out/performance/compare-001
+  --out-dir _out/performance/<campaign>/compare-001
 ```
 
 Two passes provide one AB/BA cycle for screening. Increase to a larger even
@@ -297,33 +298,17 @@ of any two builds before interpreting them. Matching launchers alone are not an 
 control, because they can load different libraries, resolve adjacent data differently
 or branch on `argv[0]`. Control the loaded images, cwd, environment and inputs too.
 
-Use each `--metadata` key once. The script refuses to overwrite an existing
-output directory and stores raw JSONL rows, command and artifact identities,
-dirty tracked patches, stdout/stderr, paired savings, and warnings about short or
-minimally repeated runs. It hashes the selected `perf` executable and rechecks
-command, profiler, artifact, Git revision, and tracked-diff identities after
-execution. Each completed profiler run must produce a nonempty counter file;
-the run row records its SHA-256. Missing evidence or identity drift makes the
-comparison fail while preserving `identity-check.json` and the partial run
-ledger. Run rows distinguish ordinary exit, timeout, launch failure, evidence
-failure, and interruption. An interrupted run exits 130 after recording its row
-and final identity check. On POSIX systems, timeout and interruption terminate
-the command's process group so descendant work does not contaminate later runs.
-Use a finite, positive `--timeout-seconds` to bound each invocation; omit it for
-no harness deadline. Where the platform has `os.pidfd_open`, exit is observed without
-polling. That removes the length-dependent delay of older captures, which added up to
-50 ms, so treat short runs in captures that set `--timeout-seconds` before this fix with
-that in mind. Elsewhere, including macOS, a deadline still polls, and the harness warns
-before running. The manifest records the planned method as
-`elapsed_measurement.planned_exit_observation` and each run its actual
-`exit_observation` (`pidfd`, `blocking-wait` or `timed-polling`). A run that used a
-different method from the plan is invalid, because one polling arm could bias the
-comparison. Launch and cleanup remain harness overhead. Timeout and interrupt cleanup reach the process group on
-POSIX, not descendants that deliberately start a new session, and only the direct
-process on Windows. Cleanup is bounded: if it cannot be confirmed, for example because
-a sandbox refuses the group signal, the run records why and the comparison fails instead
-of hanging. See [command-import.md](command-import.md#summary-conventions)
-for summary field names and the shared positive-means-faster convention.
+Use each `--metadata` key once. Retained binaries carry no Git identity of their own and
+the manifest records only the current commit, so name the two revisions, for example
+`--metadata baseline_rev=<sha> --metadata candidate_rev=<sha>`.
+
+Set a finite `--timeout-seconds` on any run that could stall. A short median, an output
+difference between the two sides, or identical launchers each add a warning to
+`summary.json`, so read that file before quoting a result. Matching stdout is not a
+correctness check; it only flags an unintended change. See
+[Harness Behavior](#harness-behavior) for what the script records and how it fails, and
+[command-import.md](command-import.md#summary-conventions) for summary field names and the
+shared positive-means-faster convention.
 
 Pass `--perf-events` with
 `cycles:u,instructions:u,branches:u,branch-misses:u,cache-references:u` only
@@ -332,7 +317,8 @@ in a comparison without `--perf-events`, then use a separate output directory
 for the counter run. The script stores one counter file per measured run instead
 of collapsing repetitions into an aggregate. Because `perf stat` can perturb
 runtime, treat elapsed values from the counter run as diagnostics rather than
-headline timings.
+headline timings. `perf stat` inherits by default, so Lean's spawned main thread is
+counted. Each `perf_stat` path in `runs.jsonl` is relative to the output directory.
 
 To turn a retained capture into an evidence report, follow
 [command-import.md](command-import.md). The importer preserves failed outcomes
@@ -369,7 +355,8 @@ Before acting on a sampled profile:
   or `start_thread` (`summarize_profile.py` reports both). Truncation can look clean:
   on Lean 4.36, `perf` DWARF stacks stopped two frames down at `lean_copy_expand_array`,
   named a real function as the caller and skipped the true one, with no `[unknown]`
-  frame anywhere. A larger stack dump did not help. Self time was still sound;
+  frame anywhere. A larger stack dump did not help, while `lake samply` reached thread
+  entries on that workload, though not on every capture. Self time was still sound;
 - compare `perf report --no-children` with call-graph views so bad unwinding
   does not hide a strong self-time target.
 - record requested and observed sampling rate, sample/event losses, target
@@ -468,16 +455,33 @@ inlining, specialization, or generated-code-shape change.
 
 ## Reporting
 
-Every profiling note should include:
+Report what the [evidence bundle](benchmark-design.md#evidence-bundle) lists, scaled to
+the decision. For an interim note, the exact command, identities and the next action or
+rejected hypothesis are enough.
 
-- exact command and input;
-- binary/input hashes, path, commit, and worktree state;
-- profiler and event list;
-- repeat/warmup policy;
-- execution order and raw samples;
-- expected and observed terminal state;
-- headline elapsed time or harness-provided aggregate counters;
-- sampled-profile target and confidence notes;
-- generated-code and native-size evidence when relevant;
-- post-change profile readout;
-- accepted next action or rejected hypothesis.
+## Harness Behavior
+
+You rarely need this unless a comparison fails or you are auditing a capture.
+
+`compare_commands.py` refuses to overwrite an output directory. It stores raw JSONL rows,
+command and artifact identities, dirty tracked patches, stdout and stderr with each run's
+stdout hash, and paired savings. It hashes the selected `perf` executable and rechecks
+command, profiler, artifact, Git revision and tracked-diff identities after execution. Each
+completed profiler run must produce a nonempty counter file, whose SHA-256 the run row
+records. Missing evidence or identity drift fails the comparison while preserving
+`identity-check.json` and the partial run ledger.
+
+Run rows distinguish ordinary exit, timeout, launch failure, evidence failure and
+interruption. An interrupted run exits 130 after recording its row and final identity check.
+Timeout and interrupt cleanup reach the process group on POSIX, not descendants that
+deliberately start a new session, and only the direct process on Windows. Cleanup is bounded:
+if it cannot be confirmed, for example because a sandbox refuses the group signal, the run
+records why and the comparison fails instead of hanging.
+
+Where the platform has `os.pidfd_open`, exit is observed without polling. Elsewhere, including
+macOS, a deadline still polls, and the harness warns before running. The manifest records the
+planned method as `elapsed_measurement.planned_exit_observation` and each run its actual
+`exit_observation` (`pidfd`, `blocking-wait` or `timed-polling`). A run that used a different
+method from the plan is invalid, because one polling arm could bias the comparison. Launch and
+cleanup remain harness overhead. Older captures that set `--timeout-seconds` polled, which added
+up to 50 ms depending on run length, so treat their short runs with care.

@@ -137,7 +137,8 @@ the check and retain the resulting limitation.
 When the project has no tests, a check written for this comparison is legitimate if
 it could have failed. In order of strength: expected output from an independent
 reimplementation or trusted reference; then the two configurations agreeing with each
-other over more inputs than the benchmark uses. A candidate compared only with its
+other over more inputs than the benchmark uses. For a path the command line cannot reach,
+a small script under `lake env lean --run` can compare the old and new definitions directly. A candidate compared only with its
 own retained output establishes nothing. The bundled `scripts/check_outputs.py` covers
 the common case, comparing every completed run's retained stdout with trusted bytes
 and recording mismatches as `failed`. It refuses to replace either output file; a later

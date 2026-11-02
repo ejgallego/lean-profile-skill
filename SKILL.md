@@ -101,6 +101,8 @@ dimensions explicitly before proposing a compiler feature or native override.
 3. Establish a baseline and a candidate.
    - Keep builds comparable: same machine, same input, same executable target,
      same diagnostics mode, same repeat/warmup policy.
+   - Copy the built executable into the evidence directory before editing source,
+     because `lake build` replaces it and the baseline is otherwise gone.
    - Preserve raw runs. Use AB/BA or another order-balanced pair when elapsed
      time is sensitive to temperature or background load.
    - Prefer repo-local harnesses when they already exist.

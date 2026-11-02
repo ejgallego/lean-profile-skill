@@ -265,7 +265,8 @@ Be skeptical of:
 
 ## Acceptance Evidence
 
-For ownership-sensitive optimizations, require all of:
+Beyond the [evidence bundle](benchmark-design.md#evidence-bundle), ownership-sensitive
+optimizations require all of:
 
 - sampled profile identifies the runtime caller or allocation class;
 - generated C explains why the candidate should help;
