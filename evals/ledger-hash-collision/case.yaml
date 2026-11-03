@@ -1,0 +1,13 @@
+schema_version: "1.1"
+name: ledger-hash-collision
+expected_outcome: |
+  The `Hashable AccountKey` instance hashes `account >>> 16`, which is zero for
+  every account in the default run, so the 45,880 keys share four hash values
+  and each `HashMap.alter` in `Book.post` walks a chain of about 11k entries
+  through `BEq`. Hashing the full account takes the default run from about 8 s
+  to about 40 ms. Stdout is unchanged because the report sorts by a total order
+  over unique keys. The evidence is a sampled profile, a distinct-hash count,
+  an order-balanced comparison of retained binaries with raw runs, an output
+  check separate from timing, and an after-profile.
+context:
+  scaffold_script: place-files.sh

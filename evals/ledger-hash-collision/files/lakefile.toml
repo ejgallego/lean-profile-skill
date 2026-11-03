@@ -1,0 +1,9 @@
+name = "ledger"
+defaultTargets = ["ledger"]
+
+[[lean_lib]]
+name = "Ledger"
+
+[[lean_exe]]
+name = "ledger"
+root = "Main"
