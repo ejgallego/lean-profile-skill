@@ -19,7 +19,7 @@ successor.
   outside the skill copy and the work project.
 - Host: `perf_event_paranoid=0`; `lake samply` and `perf stat` used, `perf record`
   probed only. Lean `4.36.0-rc2`. Load average about 5 on 24 CPUs.
-- Result: all eight graders pass. 8.327 s to 0.0386 s median, 6 passes per side, AB/BA;
+- Result: all nine graders pass (grader 08, the retained record, was split from the permissions grader after the run; the run meets both). 8.327 s to 0.0386 s median, 6 passes per side, AB/BA;
   14 captured outputs and 6 argument sets byte-identical; distinct hashes 4 against
   45,880. About 8 minutes and 31 tool calls.
 - Friction, in order of weight:
