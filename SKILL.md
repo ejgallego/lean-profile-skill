@@ -65,7 +65,7 @@ hang. These habits keep a capture alive and its evidence trustworthy:
   on the machine. If the host is shared, record its load and limit the claim.
 - Report environment blockers rather than changing them. Kernel profiling
   settings belong to the user.
-- Native runtime work needs a sampling profiler. If none is permitted, stop and say
+- Native runtime work needs a sampling profiler. If none is usable, stop and say
   so: do not substitute timings, counters or a debugger census for attribution, and
   do not change code on a guess.
 - Scale evidence to the decision. An effect of orders of magnitude does not need
@@ -91,8 +91,8 @@ dimensions explicitly before proposing a compiler feature or native override.
 
 Before anything else, run `python3 "$skill_dir/scripts/check_sampling.py"`. It
 probes each sampling backend and names the one to use. On exit 3 no backend is
-permitted: relay its message, which says what the machine's owner can change, and
-stop until they have.
+usable: relay its message, which quotes each failed probe and what the machine's owner
+can look at, and stop until they have.
 
 1. Define the workload before profiling.
    - Prefer a representative command the user actually cares about.

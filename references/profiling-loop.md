@@ -27,9 +27,10 @@ and prints one verdict:
 python3 "$skill_dir/scripts/check_sampling.py"        # add --json for the full record
 ```
 
-Exit 0 names the backend to use. Exit 3 means none is permitted. Then native
-attribution stops: relay the printed message, which names what was refused and what
-the machine's owner can change, and wait for them. The steps below explain what it
+Exit 0 names the backend to use. Exit 3 means none is usable. Then native
+attribution stops: relay the printed message and wait for the machine's owner. It
+quotes each failed probe's diagnostic, which names the cause; a permission error is
+the common one, but an unsupported option or broken install also fails a probe. The steps below explain what it
 checks and how to probe by hand on a host it does not cover.
 
 The command examples in this reference use POSIX shell syntax. Translate command
@@ -332,8 +333,11 @@ A short median, an output difference between the two sides, or identical launche
 add a warning to `summary.json`, so read that file before quoting a result. Matching stdout is not a
 correctness check; it only flags an unintended change. To check that baseline and
 candidate agree on more inputs than the benchmark uses, run
-`scripts/compare_outputs.py` with one `--case` per argument set. It times nothing,
-keeps every output and exits 1 unless every case matches:
+`scripts/compare_outputs.py` with one `--case` per argument set. It times nothing and
+keeps every output. It exits 1 unless every case matches and both executables and the
+Git state are unchanged afterwards (`identity-check.json`). Both sides must exit with
+`--expected-exit-code`, 0 by default, so a crash shared by both is an error, not a
+match:
 
 ```bash
 python3 "$skill_dir/scripts/compare_outputs.py" \
@@ -342,8 +346,9 @@ python3 "$skill_dir/scripts/compare_outputs.py" \
   --out-dir _out/performance/<campaign>/outputs-001
 ```
 
-Add `--repeat 2` to catch output that varies between runs, and `--compare-stderr` when
-stderr is part of the contract. Matching exit status and bytes is still only as strong
+Add `--repeat 2` to catch output that varies between runs, `--compare-stderr` when
+stderr is part of the contract, and a nonzero `--expected-exit-code` to check that both
+reject the same bad input. Matching exit status and bytes is still only as strong
 as the cases chosen.
 
 The short-median warning names each arm whose median is under 100 ms. It qualifies

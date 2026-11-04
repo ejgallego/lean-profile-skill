@@ -4,8 +4,14 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
-SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "compare_outputs.py"
+SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
+SCRIPT = SCRIPTS / "compare_outputs.py"
+sys.path.insert(0, str(SCRIPTS))
+
+import compare_commands
+import compare_outputs
 
 
 def program(code):
@@ -45,11 +51,47 @@ class CompareOutputsTests(unittest.TestCase):
         self.assertEqual([case["verdict"] for case in summary["cases"]], ["match", "differ"])
         self.assertIn("case 2 []: differ", result.stdout)
 
-    def test_exit_status_is_part_of_the_comparison(self):
-        _, summary = self.run_tool(program("raise SystemExit(0)"), program("raise SystemExit(4)"),
-                                   "--case", "[]")
-        self.assertEqual(summary["cases"][0]["verdict"], "differ")
+    def test_unexpected_exit_status_is_an_error(self):
+        result, summary = self.run_tool(program("raise SystemExit(0)"), program("raise SystemExit(4)"),
+                                        "--case", "[]")
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(summary["cases"][0]["verdict"], "error")
         self.assertEqual(summary["cases"][0]["candidate"]["exit_codes"], [4])
+        self.assertIn("candidate exited 4, expected 0", result.stdout)
+
+    def test_the_same_failure_on_both_sides_is_not_a_match(self):
+        crash = program("raise SystemExit(7)")
+        result, summary = self.run_tool(crash, crash, "--case", "[]")
+        self.assertEqual(result.returncode, 1)
+        self.assertFalse(summary["all_match"])
+        self.assertEqual(summary["cases"][0]["verdict"], "error")
+
+    def test_an_expected_nonzero_status_can_match(self):
+        reject = program("import sys; print('bad input', file=sys.stderr); raise SystemExit(7)")
+        result, summary = self.run_tool(reject, reject, "--case", '["x"]', "--expected-exit-code", "7")
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertTrue(summary["all_match"])
+        manifest = json.loads((self.out / "manifest.json").read_text())
+        self.assertEqual(manifest["expected_exit_code"], 7)
+
+    def test_executables_that_change_during_the_run_invalidate_the_result(self):
+        scripts = []
+        for name in ("baseline", "candidate"):
+            path = self.out.with_name(name)
+            # Prints the same bytes as its twin, then rewrites itself.
+            path.write_text(f"#!{sys.executable}\nimport sys\nprint('same')\n"
+                            "open(sys.argv[0], 'a').write('# changed\\n')\n")
+            path.chmod(0o755)
+            scripts.append(json.dumps([str(path)]))
+        result, summary = self.run_tool(*scripts, "--case", "[]")
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(summary["cases"][0]["verdict"], "match")
+        self.assertFalse(summary["identity_valid"])
+        self.assertFalse(summary["all_match"])
+        check = json.loads((self.out / "identity-check.json").read_text())
+        self.assertEqual(sorted(change["subject"] for change in check["changes"]),
+                         ["command:baseline", "command:candidate"])
+        self.assertIn("identity changed", result.stderr)
 
     def test_stderr_counts_only_when_requested(self):
         quiet, noisy = program("print(1)"), program("import sys; print(1); print('x', file=sys.stderr)")
@@ -58,6 +100,7 @@ class CompareOutputsTests(unittest.TestCase):
         self.out = self.out.with_name("strict")
         result, summary = self.run_tool(quiet, noisy, "--case", "[]", "--compare-stderr")
         self.assertEqual(summary["cases"][0]["verdict"], "differ")
+        self.assertIn("stderr differs", result.stdout)
 
     def test_varying_side_is_unstable_rather_than_compared(self):
         varying = program("import os; print(os.getpid())")
@@ -70,6 +113,23 @@ class CompareOutputsTests(unittest.TestCase):
         result, summary = self.run_tool(slow, slow, "--case", "[]", "--timeout-seconds", "0.5")
         self.assertEqual(summary["cases"][0]["verdict"], "error")
         self.assertIn("baseline timed out", result.stdout)
+
+    def test_nonfinite_timeout_is_refused(self):
+        result, _ = self.run_tool(program("pass"), program("pass"), "--case", "[]",
+                                  "--timeout-seconds", "nan")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("finite and positive", result.stderr)
+
+    def test_a_vanished_process_group_is_recorded_without_a_traceback(self):
+        self.out.mkdir()
+        argv = [sys.executable, "-c", "import time; time.sleep(30)"]
+        with mock.patch.object(compare_commands.os, "killpg", side_effect=ProcessLookupError), \
+                mock.patch.object(compare_commands, "CLEANUP_SECONDS", 0.5):
+            run = compare_outputs.run_once(argv, 0.3, self.out, "001-baseline-1")
+        self.assertTrue(run["timed_out"])
+        self.assertIsNone(run["exit_code"])
+        self.assertIn("killed the root process only", run["cleanup_error"])
+        self.assertTrue((self.out / "001-baseline-1.stdout").exists())
 
     def test_existing_output_directory_is_refused(self):
         self.out.mkdir()

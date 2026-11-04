@@ -30,7 +30,7 @@ class CheckSamplingTests(unittest.TestCase):
         self.assertIsNone(report["selected"])
         message = tool.blocked_message(report)
         self.assertIn("native attribution stops here", message)
-        self.assertIn("perf was refused (exit 1): Permission denied", message)
+        self.assertIn("perf probe failed (exit 1): Permission denied", message)
         self.assertIn("sudo sysctl kernel.perf_event_paranoid=1", message)
         self.assertIn("owner's decision", message)
 
@@ -41,8 +41,17 @@ class CheckSamplingTests(unittest.TestCase):
 
     def test_unknown_level_points_at_the_diagnostic(self):
         message = tool.blocked_message(tool.assess(None, *host({"samply"}, set())))
-        self.assertIn("resolve the refusal shown above", message)
+        self.assertIn("resolve the failure each diagnostic above shows", message)
         self.assertNotIn("perf_event_open", message)
+
+    def test_a_non_permission_failure_is_not_diagnosed_as_one(self):
+        report = tool.assess(2, *host({"perf"}, set(), "unrecognized option '--user-callchains'"))
+        message = tool.blocked_message(report)
+        self.assertIn("perf probe failed (exit 1): unrecognized option '--user-callchains'", message)
+        self.assertIn("names the cause", message)
+        self.assertIn("if a diagnostic is a permission error", message)
+        self.assertNotIn("refused", message)
+        self.assertIn("perf: probe failed", tool.describe(report, None).splitlines())
 
     def test_missing_tools_suggest_installing_rather_than_sysctl(self):
         message = tool.blocked_message(tool.assess(0, *host(set(), set())))

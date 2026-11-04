@@ -2,10 +2,11 @@
 """Probe which native sampling backends this host permits; fail when none does.
 
 Each installed backend records a trivial Python process. A backend counts as
-permitted only when that recording succeeds, so the verdict is tested, not
-inferred from `perf_event_paranoid`. Exit 0 names the backend to use; exit 3
-means native attribution cannot proceed, and the printed message says what the
-machine's owner can change. The probe never changes kernel settings.
+usable only when that recording succeeds, so the verdict is tested, not
+inferred from `perf_event_paranoid`. A failed probe is reported with its own
+diagnostic, which may show a permission refusal or another cause. Exit 0 names
+the backend to use; exit 3 means native attribution cannot proceed, and the
+message says what the machine's owner can look at. Nothing is changed.
 """
 
 from __future__ import annotations
@@ -70,14 +71,14 @@ def assess(paranoid: int | None, which: Callable[[str], str | None],
     backends = []
     for name, arguments in BACKENDS.items():
         path = which(name)
-        entry: dict[str, Any] = dict(name=name, path=path, permitted=False)
+        entry: dict[str, Any] = dict(name=name, path=path, usable=False)
         if path is not None:
             argv = [path, *arguments, *PROBE_TARGET]
             status, diagnostic = probe(argv)
-            entry.update(command=argv, exit_status=status, permitted=status == 0,
+            entry.update(command=argv, exit_status=status, usable=status == 0,
                          diagnostic=diagnostic)
         backends.append(entry)
-    selected = next((entry["name"] for entry in backends if entry["permitted"]), None)
+    selected = next((entry["name"] for entry in backends if entry["usable"]), None)
     return dict(system=platform.system(), perf_event_paranoid=paranoid,
                 backends=backends, selected=selected)
 
@@ -85,25 +86,27 @@ def assess(paranoid: int | None, which: Callable[[str], str | None],
 def blocked_message(report: dict[str, Any]) -> str:
     level = report["perf_event_paranoid"]
     installed = [entry for entry in report["backends"] if entry["path"]]
-    lines = ["Native sampling is not available on this host, so native attribution stops here.",
+    lines = ["No sampling backend is usable on this host, so native attribution stops here.",
              "Timings and counters cannot show where the time goes, so no hotspot claim is made."]
     for entry in installed:
         status = entry["exit_status"]
         outcome = f"exit {status}" if status is not None else "did not finish"
-        lines.append(f"- {entry['name']} was refused ({outcome}): "
+        lines.append(f"- {entry['name']} probe failed ({outcome}): "
                      + (entry["diagnostic"].splitlines() or ["no diagnostic"])[-1])
     for entry in report["backends"]:
         if not entry["path"]:
             lines.append(f"- {entry['name']} is not installed")
     options = []
-    if level is not None and level > 1:
-        options.append(f"lower kernel.perf_event_paranoid (now {level}) until the next reboot:\n"
+    if installed:
+        options.append("resolve the failure each diagnostic above shows; it, not this list, "
+                       "names the cause")
+    if installed and level is not None and level > 1:
+        options.append(f"if a diagnostic is a permission error, lowering kernel.perf_event_paranoid "
+                       f"(now {level}) until the next reboot may resolve it:\n"
                        "      sudo sysctl kernel.perf_event_paranoid=1")
     elif installed and level is not None:
-        options.append("find what refuses perf_event_open although the kernel level permits it, "
-                       "such as a container, a seccomp profile or a missing CAP_PERFMON")
-    elif installed:
-        options.append("resolve the refusal shown above")
+        options.append("if a diagnostic is a permission error although the kernel level permits "
+                       "sampling, look for a container, a seccomp profile or a missing CAP_PERFMON")
     if not installed:
         options.append("install samply (`cargo install --locked samply`) or Linux perf")
     elif level == 2 and not any(entry["name"] == "perf" for entry in installed):
@@ -119,7 +122,7 @@ def describe(report: dict[str, Any], lake_samply: bool | None) -> str:
     lines = [f"perf_event_paranoid: {report['perf_event_paranoid']}"]
     for entry in report["backends"]:
         state = ("not installed" if not entry["path"]
-                 else "permitted" if entry["permitted"] else "refused")
+                 else "usable" if entry["usable"] else "probe failed")
         lines.append(f"{entry['name']}: {state}")
     if lake_samply is not None:
         lines.append(f"lake samply: {'available' if lake_samply else 'not in this toolchain'}")
