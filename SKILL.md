@@ -127,7 +127,7 @@ dimensions explicitly before proposing a compiler feature or native override.
      project's profiler. `scripts/summarize_profile.py` reads `lake samply` and
      `perf script` output from a terminal and flags truncated stacks.
    - Start with self time, then inspect children and callers. Classify the hot
-     leaves before choosing a hypothesis: copies, allocation, cheap work repeated
+     leaves before choosing a hypothesis: copying, allocation, cheap work repeated
      far more often than the input predicts, waiting and startup each lead to a
      different check ([classes](references/profiling-loop.md#classifying-the-hot-leaf)).
    - Validate that samples come from the intended process or descendants, not

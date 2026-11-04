@@ -427,8 +427,8 @@ they explain only one class.
 
 | Dominant leaves | Cost class | Next deterministic check |
 | --- | --- | --- |
-| `lean_copy_expand_array`, `lean::lean_del_core_other`, other copy or free helpers | copies from lost exclusivity | [generated-c-ownership.md](generated-c-ownership.md): find the reference still live at the update |
-| allocator entries, `lean_alloc_*`, `lean_dec_ref_cold`, dense RC | allocation, boxing or reference-count churn | [runtime-mechanics.md](runtime-mechanics.md): read the caller's allocations in generated C |
+| `lean_copy_expand_array` and other copy or clone helpers | copying or capacity growth; lost exclusivity is one hypothesis | caller and generated C: is a reference still live at the update ([generated-c-ownership.md](generated-c-ownership.md)), or is the structure growing? |
+| allocator entries, `lean_alloc_*`, `lean::lean_del_core_other`, `lean_dec_ref_cold`, dense RC | allocation, deallocation, boxing or reference-count churn | confirm the object kind, the caller and the operation count before choosing ownership or allocation work ([runtime-mechanics.md](runtime-mechanics.md)) |
 | project or library code doing little per call: comparisons, traversal steps, accessors, string or list operations | more work than the input size predicts, from the algorithm, the data structure or the shape of the input | count calls or traversal steps per input element on a small input, and compare with the expected cost |
 | syscalls, futex, scheduler or wait frames | blocking, I/O or contention | [runtime-mechanics.md](runtime-mechanics.md#tasks-async-io-and-synchronization): separate waiting from runnable work |
 | startup, initialization or module loading | fixed cost | a zero-work run of the same binary |
