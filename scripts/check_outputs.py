@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Compare retained compare_commands.py stdout with trusted bytes; never run commands."""
+"""Compare retained compare_commands.py stdout with trusted bytes; never run commands.
+
+The requested validation path is accompanied by a sibling `<stem>-results.json`
+containing the byte-comparison evidence referenced from the validation record.
+"""
 
 from __future__ import annotations
 
@@ -86,7 +90,8 @@ if __name__ == "__main__":
     parser.add_argument("--expected", type=Path, required=True,
                         help="Trusted stdout bytes, produced independently of the runs when possible")
     parser.add_argument("--scope", required=True, help="What matching this output establishes")
-    parser.add_argument("--out", type=Path, required=True, help="Fresh validation record for --validation")
+    parser.add_argument("--out", type=Path, required=True,
+                        help="Fresh validation JSON; also writes sibling <stem>-results.json")
     args = parser.parse_args()
     matched, total = check_outputs(args.capture, args.expected, args.scope, args.out)
     print(f"{matched}/{total} completed runs matched; {args.out}")

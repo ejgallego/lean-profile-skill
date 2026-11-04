@@ -112,13 +112,24 @@ python3 "$skill_dir/scripts/summarize_profile.py" \
   "$profile_run_dir/profile-demangled.json.gz" --top 20
 ```
 
-It prints each thread's weight, entry-reaching share and unknown-frame share, then
-self, inclusive and leaf-first stack tables. `--tid` selects one thread, `--thread`
-matches names and `--json` keeps a record. Judge stack quality per thread: well-rooted
-helpers can mask broken stacks on the thread doing the work, so the aggregate is only
-an overview. It also reads Lean's `trace.profiler.output` files, where weights are scope milliseconds, not
-samples, and a parent's "self" is the residual of everything its children and the
-trace threshold left unattributed rather than a hotspot.
+It prints stack-depth p50/p95/max, each thread's weight, entry-reaching share and
+unknown-frame share, then self, inclusive and leaf-first stack tables. `--tid`
+selects one thread, `--thread` matches names and `--json` keeps a record. Judge stack
+quality per thread: well-rooted helpers can mask broken stacks on the thread doing the
+work, so the aggregate is only an overview. The automatic missing-caller warning
+applies only when a selected thread carries at least 10% of selected weight and at
+least 20 weight units; smaller threads remain visible in the table.
+
+Low entry-reaching share is not by itself proof of broken unwinding. A high p95 with
+many stacks ending at a similar deep level and repeated recursive frames can mean that
+legitimate recursion reached the profiler's stack cap. Inspect those frames in the raw
+profile. Shallow stacks that stop at implausible application frames across unrelated
+paths remain suspect. In either case self time is usable, while inclusive and caller
+shares describe only the captured prefixes.
+
+The summarizer also reads Lean's `trace.profiler.output` files, where weights are scope
+milliseconds, not samples, and a parent's "self" is the residual of everything its
+children and the trace threshold left unattributed rather than a hotspot.
 
 Record `lake --version`, `samply --version`, the exact target and arguments, the
 profile hash, and the final executable hash. `lake samply` builds the target, so

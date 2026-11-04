@@ -115,7 +115,18 @@ class SummarizeTests(unittest.TestCase):
         self.assertEqual(result["self"][1]["name"], "lean_copy_expand_array")
         self.assertEqual(result["rooted_stack_percent"], 100.0)
         self.assertEqual(result["stack_depths"], [(2, 1), (3, 1)])
+        self.assertEqual(result["stack_depth"], dict(p50=2, p95=3, max=3))
+        self.assertIn("stack depth (selected weight): p50 2, p95 3, max 3",
+                      tool.render(result))
         self.assertEqual({row["tid"] for row in result["threads"]}, {"42", "43"})
+
+    def test_depth_percentiles_expose_a_deep_stack_population(self):
+        threads = [dict(name="worker", pid=1, tid=2, weight_type="samples",
+                        rows=[(40, ["leaf", "start_thread"]),
+                              (60, ["recursive"] * 400)])]
+        result = tool.summarize(threads)
+        self.assertEqual(result["stack_depth"], dict(p50=400, p95=400, max=400))
+        self.assertEqual(result["rooted_stack_percent"], 40.0)
 
     def test_clean_looking_truncated_stacks_are_flagged(self):
         result = self.perf("tally  42 \n\t  10 lean_copy_expand_array\n\t  20 lp_tally_run\n\n" * 25)

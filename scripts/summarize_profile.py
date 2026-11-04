@@ -115,6 +115,17 @@ def profiler_thread(item, threads):
         for other in threads)
 
 
+def weighted_depth(depths, fraction):
+    """Return the first depth whose cumulative weight reaches fraction of the total."""
+    threshold = sum(depths.values()) * fraction
+    cumulative = 0
+    for depth, weight in sorted(depths.items()):
+        cumulative += weight
+        if cumulative >= threshold:
+            return depth
+    raise ValueError("No stack depths")
+
+
 def summarize(threads, source="profile", *, top=15, thread=None, tid=None):
     self_time, inclusive, chains, depths = Counter(), Counter(), Counter(), Counter()
     summaries = []
@@ -177,6 +188,8 @@ def summarize(threads, source="profile", *, top=15, thread=None, tid=None):
                 unknown_leaf_percent=100 * unknown / total,
                 rooted_stack_percent=100 * rooted / total,
                 stack_depths=sorted(depths.items()),
+                stack_depth=dict(p50=weighted_depth(depths, 0.5),
+                                 p95=weighted_depth(depths, 0.95), max=max(depths)),
                 threads=sorted(summaries, key=lambda row: -row["weight"]), warnings=warnings,
                 self=table(self_time), inclusive=table(inclusive), stacks=table(chains))
 
@@ -189,6 +202,9 @@ def render(summary):
     lines = [f'{summary["source"]}, weight {summary["total"]}: unknown leaf frames '
              f'{summary["unknown_leaf_percent"]:.1f}%, stacks reaching a thread entry '
              f'{summary["rooted_stack_percent"]:.1f}%']
+    depth = summary["stack_depth"]
+    lines.append(f'stack depth (selected weight): p50 {depth["p50"]}, '
+                 f'p95 {depth["p95"]}, max {depth["max"]}')
     lines += [f'warning: {warning}' for warning in summary["warnings"]]
     lines.append("threads (confirm the intended workers carry the weight and reach an entry):")
     lines += [f'  {row["weight"]:>8}  rooted {row["rooted_percent"]:5.1f}%  unknown '

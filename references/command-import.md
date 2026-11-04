@@ -5,6 +5,12 @@ Use `scripts/import_comparison.py` for a capture produced by the bundled
 recheck binaries against the current checkout, or perform correctness tests.
 The output feeds [the report builder](profile-review.md).
 
+`check_outputs.py` is standalone: use it without the importer or report builder when
+all you need is a byte-exact check of retained run output. It never runs the compared
+commands. Given `--out checks/validation.json`, it writes that validation document and
+the sibling evidence file `checks/validation-results.json`; pass the former to the
+importer only when building a report.
+
 ```bash
 python3 "$skill_dir/scripts/check_outputs.py" _out/performance/capture \
   --expected _out/performance/expected-stdout.txt \

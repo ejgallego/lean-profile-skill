@@ -58,7 +58,9 @@ hang. These habits keep a capture alive and its evidence trustworthy:
   server in the background, and stop whatever you started before finishing.
 - Keep evidence in `_out/performance/<campaign>/` or the project's established
   equivalent, not in temporary storage. A restart can empty temporary directories
-  and end a long investigation with nothing retained.
+  and end a long investigation with nothing retained. If that path is not ignored,
+  add it to `.git/info/exclude` instead of changing the project's `.gitignore` just
+  for the investigation.
 - Run timing samples sequentially, with no parallel builds, agents or test suites
   on the machine. If the host is shared, record its load and limit the claim.
 - Report environment blockers rather than changing them. Kernel profiling
