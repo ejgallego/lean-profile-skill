@@ -145,8 +145,10 @@ it could have failed. In order of strength: expected output from an independent
 reimplementation or trusted reference; then the two configurations agreeing with each
 other over more inputs than the benchmark uses. For a path the command line cannot reach,
 a small script under `lake env lean --run` can compare the old and new definitions directly. A candidate compared only with its
-own retained output establishes nothing. The bundled `scripts/check_outputs.py` covers
-the common case, comparing every completed run's retained stdout with trusted bytes
+own retained output establishes nothing. For the second kind, `scripts/compare_outputs.py`
+runs both configurations over chosen argument sets without timing them; see
+[profiling-loop.md](profiling-loop.md#order-balanced-comparison). The bundled
+`scripts/check_outputs.py` covers the common case, comparing every completed run's retained stdout with trusted bytes
 and recording mismatches as `failed`. It refuses to replace either output file; a later
 I/O failure can leave only the newly created part. `--scope` must say what the match
 establishes and what it omits. It handles byte-exact output only; write the validation document

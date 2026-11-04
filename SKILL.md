@@ -64,7 +64,10 @@ hang. These habits keep a capture alive and its evidence trustworthy:
 - Run timing samples sequentially, with no parallel builds, agents or test suites
   on the machine. If the host is shared, record its load and limit the claim.
 - Report environment blockers rather than changing them. Kernel profiling
-  settings belong to the user; profile with what is permitted and name the gap.
+  settings belong to the user.
+- Native runtime work needs a sampling profiler. If none is permitted, stop and say
+  so: do not substitute timings, counters or a debugger census for attribution, and
+  do not change code on a guess.
 - Scale evidence to the decision. An effect of orders of magnitude does not need
   the sampling a 3% claim does, while landing evidence still needs output checks,
   an after-profile and the limits of what was measured.
@@ -85,6 +88,11 @@ inlining or specialization duplicates too much generated code. Test those
 dimensions explicitly before proposing a compiler feature or native override.
 
 ## Native runtime workflow
+
+Before anything else, run `python3 "$skill_dir/scripts/check_sampling.py"`. It
+probes each sampling backend and names the one to use. On exit 3 no backend is
+permitted: relay its message, which says what the machine's owner can change, and
+stop until they have.
 
 1. Define the workload before profiling.
    - Prefer a representative command the user actually cares about.
@@ -113,14 +121,17 @@ dimensions explicitly before proposing a compiler feature or native override.
    - If no comparison harness exists, use the bundled
      `scripts/compare_commands.py` to preserve order-balanced raw runs and
      command identities.
+   - Check that the outputs agree on more inputs than the benchmark uses, without
+     timing them, with `scripts/compare_outputs.py`.
    - To report retained harness captures, read
      [command-import.md](references/command-import.md). Importing does not validate
      outputs; explicit checks determine statistical inclusion, independently of
      the optimization decision.
 
 4. Collect attribution with native profilers.
-   - Run the [backend preflight](references/profiling-loop.md#backend-preflight)
-     first: `perf stat` succeeding does not show that sampling works.
+   - Use the backend that `check_sampling.py` selected; the
+     [backend preflight](references/profiling-loop.md#backend-preflight) explains
+     its probes. `perf stat` succeeding does not show that sampling works.
    - For a Lake executable target, prefer `lake samply` when the pinned
      toolchain provides it (Lean 4.36 onward) and the kernel permits it; it builds
      the target and demangles Lean names. Otherwise use `perf record` or the
