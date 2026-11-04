@@ -220,6 +220,24 @@ class OutputWarningTests(unittest.TestCase):
         self.assertEqual(compare_commands.output_warnings(rows), [])
 
 
+class ShortRunWarningTests(unittest.TestCase):
+    def test_long_arms_stay_quiet(self) -> None:
+        self.assertEqual(compare_commands.short_run_warnings({"baseline": 8e9, "candidate": 1e8}), [])
+
+    def test_only_the_short_arm_is_named(self) -> None:
+        warnings = compare_commands.short_run_warnings({"baseline": 8.3e9, "candidate": 38.6e6})
+        self.assertEqual(len(warnings), 1)
+        self.assertTrue(warnings[0].startswith("Candidate median is 38.6 ms"))
+        self.assertIn("zero-work run", warnings[0])
+
+    def test_each_short_arm_is_named(self) -> None:
+        warnings = compare_commands.short_run_warnings({"baseline": 5e6, "candidate": 4e6})
+        self.assertEqual([w.split()[0] for w in warnings], ["Baseline", "Candidate"])
+
+    def test_missing_median_is_skipped(self) -> None:
+        self.assertEqual(compare_commands.short_run_warnings({"baseline": None, "candidate": 2e8}), [])
+
+
 class CompareCommandsTests(unittest.TestCase):
     def compare_command(
         self,

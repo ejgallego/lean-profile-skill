@@ -111,7 +111,9 @@ class ImportTests(unittest.TestCase):
             row["elapsed_ns"] = 5_000_000
         self.save()
         validation, _ = self.validation()
-        self.assertIn("under 100 ms", self.report(self.run_import(validation))["summary"])
+        summary = self.report(self.run_import(validation))["summary"]
+        self.assertIn("Baseline median is 5.0 ms", summary)
+        self.assertIn("Candidate median is 5.0 ms", summary)
         self.out = self.root / "long-unvalidated"
         # Excluded runs enter no statistics, so they raise no statistical caveat.
         self.assertNotIn("under 100 ms", self.report(self.run_import())["summary"])

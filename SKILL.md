@@ -126,7 +126,10 @@ dimensions explicitly before proposing a compiler feature or native override.
      the target and demangles Lean names. Otherwise use `perf record` or the
      project's profiler. `scripts/summarize_profile.py` reads `lake samply` and
      `perf script` output from a terminal and flags truncated stacks.
-   - Start with self time, then inspect children and callers.
+   - Start with self time, then inspect children and callers. Classify the hot
+     leaves before choosing a hypothesis: copies, allocation, cheap work repeated
+     far more often than the input predicts, waiting and startup each lead to a
+     different check ([classes](references/profiling-loop.md#classifying-the-hot-leaf)).
    - Validate that samples come from the intended process or descendants, not
      only a launcher or waiting parent. A nonempty profile file is not enough.
    - Validate symbol and call-chain quality before trusting caller stacks. Named
@@ -149,7 +152,8 @@ dimensions explicitly before proposing a compiler feature or native override.
 
 7. Accept changes only with a complete performance story.
    - State the measured hotspot, the changed normal code path, the before/after
-     evidence, and any correctness tests.
+     evidence, and any correctness tests; the
+     [evidence bundle](references/benchmark-design.md#evidence-bundle) lists the rest.
    - Track native code and key symbol sizes when factoring or inlining changes.
    - Collect a fresh post-change profile and verify that the original caller or
      cost bucket moved as predicted.

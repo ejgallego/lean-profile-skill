@@ -8,6 +8,9 @@ This is an investigator's experiment ledger, not the report builder's observatio
 JSONL or input manifest. Use [review-format.md](review-format.md) for those inputs;
 map a concluded ledger status to `decision_status`, not statistical `included`.
 
+The [evidence bundle](benchmark-design.md#evidence-bundle) is the canonical list of
+what a landing decision needs; these fields record it for each candidate.
+
 ## Required Fields
 
 - `id`: stable short name

@@ -208,6 +208,7 @@ def check_identity(
 
 # Bounds cleanup, so a denied signal cannot turn a deadline into a hang.
 CLEANUP_SECONDS = 5.0
+SHORT_RUN_NS = 100_000_000
 
 
 def await_exit_unreaped(
@@ -553,6 +554,17 @@ def output_warnings(rows: list[dict[str, Any]]) -> list[str]:
     return warnings
 
 
+def short_run_warnings(medians: dict[str, float | None]) -> list[str]:
+    """Name each arm whose median is close enough to process startup to be dominated by it."""
+    return [
+        f"{label.capitalize()} median is {median / 1e6:.1f} ms, under 100 ms, so process startup "
+        "and timer noise may dominate it; time a zero-work run of the same binary for the "
+        "startup floor, and prefer the absolute saving to the ratio."
+        for label, median in medians.items()
+        if median is not None and median < SHORT_RUN_NS
+    ]
+
+
 def comparison_schedule(
     passes: int, warmups: int
 ) -> Iterator[tuple[str, int, int, str]]:
@@ -816,10 +828,7 @@ def main() -> int:
     baseline_median = summary["baseline"]["median_ns"]
     candidate_median = summary["candidate"]["median_ns"]
     warnings = list(preflight_warnings)
-    if min(baseline_median, candidate_median) < 100_000_000:
-        warnings.append(
-            "Median runtime is under 100 ms; process startup and timer noise may dominate."
-        )
+    warnings.extend(short_run_warnings({"baseline": baseline_median, "candidate": candidate_median}))
     if args.passes == 2:
         warnings.append(
             "Two passes are one AB/BA cycle and should be treated as screening evidence."

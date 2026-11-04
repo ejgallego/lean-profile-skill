@@ -10,6 +10,7 @@ Use this reference for the concrete mechanics of profiling Lean executables.
 - Order-Balanced Comparison
 - Phase Mapping
 - Attribution Quality
+- Classifying the Hot Leaf
 - Attribution Escalation
 - Controlled Windows
 - Post-change Verification
@@ -313,10 +314,20 @@ Use each `--metadata` key once. Retained binaries carry no Git identity of their
 the manifest records only the current commit, so name the two revisions, for example
 `--metadata baseline_rev=<sha> --metadata candidate_rev=<sha>`.
 
-Set a finite `--timeout-seconds` on any run that could stall. A short median, an output
-difference between the two sides, or identical launchers each add a warning to
-`summary.json`, so read that file before quoting a result. Matching stdout is not a
-correctness check; it only flags an unintended change. See
+Set a finite `--timeout-seconds` on any run that could stall. The first run that times
+out, fails to launch, loses evidence or exits with a status other than `--expected-exit-code`
+stops the comparison. The script then exits 1, or 130 when interrupted, and keeps the
+partial capture; rerun into a new directory. A changed identity after the runs also exits 1.
+A short median, an output difference between the two sides, or identical launchers each
+add a warning to `summary.json`, so read that file before quoting a result. Matching stdout is not a
+correctness check; it only flags an unintended change.
+
+The short-median warning names each arm whose median is under 100 ms. It qualifies
+that arm's absolute time, not the size of the effect: a fix that drops a run from
+seconds to milliseconds will trigger it on the candidate alone. Time a zero-work run of
+the same binary, such as an empty input or zero iterations, under the same harness to
+measure the startup floor. Then report the absolute saving, and the candidate's time
+above that floor, rather than a ratio of two near-floor medians. See
 [Harness Behavior](#harness-behavior) for what the script records and how it fails, and
 [command-import.md](command-import.md#summary-conventions) for summary field names and the
 shared positive-means-faster convention.
@@ -330,6 +341,25 @@ of collapsing repetitions into an aggregate. Because `perf stat` can perturb
 runtime, treat elapsed values from the counter run as diagnostics rather than
 headline timings. `perf stat` inherits by default, so Lean's spawned main thread is
 counted. Each `perf_stat` path in `runs.jsonl` is relative to the output directory.
+This lists one counter per measured run, keeping runs separate rather than merging
+them into the headline timing:
+
+```bash
+python3 - _out/performance/<campaign>/counters-001 <<'EOF'
+import json, re, sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+for line in (root / "runs.jsonl").read_text().splitlines():
+    row = json.loads(line)
+    if row["phase"] != "measured" or not row.get("perf_stat"):
+        continue
+    text = (root / row["perf_stat"]).read_text()
+    counts = {event: int(value.replace(",", ""))
+              for value, event in re.findall(r"^\s*([\d,]+)\s+(\S+)", text, re.M)}
+    print(row["label"], row["sequence"], counts.get("instructions:u"))
+EOF
+```
 
 To turn a retained capture into an evidence report, follow
 [command-import.md](command-import.md). The importer preserves failed outcomes
@@ -388,6 +418,26 @@ for those:
 Use that binary to repair attribution. Do not mix frame-pointer build timings
 with normal build timings unless the project accepts that build mode as the
 benchmark target.
+
+## Classifying the Hot Leaf
+
+Classify the dominant self-time leaves before choosing a hypothesis. The class decides
+which check comes next. Ownership and generated C feature prominently in this skill, but
+they explain only one class.
+
+| Dominant leaves | Cost class | Next deterministic check |
+| --- | --- | --- |
+| `lean_copy_expand_array`, `lean::lean_del_core_other`, other copy or free helpers | copies from lost exclusivity | [generated-c-ownership.md](generated-c-ownership.md): find the reference still live at the update |
+| allocator entries, `lean_alloc_*`, `lean_dec_ref_cold`, dense RC | allocation, boxing or reference-count churn | [runtime-mechanics.md](runtime-mechanics.md): read the caller's allocations in generated C |
+| project or library code doing little per call: comparisons, traversal steps, accessors, string or list operations | more work than the input size predicts, from the algorithm, the data structure or the shape of the input | count calls or traversal steps per input element on a small input, and compare with the expected cost |
+| syscalls, futex, scheduler or wait frames | blocking, I/O or contention | [runtime-mechanics.md](runtime-mechanics.md#tasks-async-io-and-synchronization): separate waiting from runnable work |
+| startup, initialization or module loading | fixed cost | a zero-work run of the same binary |
+
+A cheap leaf with a huge sample count is not a reason to make that function faster.
+First ask why it runs so often. Inclusive callers name the operation that drives the
+count. A deterministic count in a probe, of calls or of the size of what is traversed,
+tests the explanation before any source changes. Leaves from several classes usually
+mean separate costs, so rank them by self time and treat them one at a time.
 
 ## Attribution Escalation
 

@@ -132,7 +132,7 @@ delete it when the campaign ends.
    ```bash
    lake env lean \
      -Dtrace.profiler=true \
-     -Dtrace.profiler.output=_out/profile.json \
+     -Dtrace.profiler.output=_out/performance/<campaign>/profile.json \
      Module.lean
    ```
 

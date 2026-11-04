@@ -11,7 +11,7 @@ import shlex
 import statistics
 import sys
 
-from compare_commands import output_warnings
+from compare_commands import output_warnings, short_run_warnings
 from review_data import SCHEMA, array, digest, text
 from review_observations import json_value, jsonl_rows, observations
 
@@ -178,15 +178,13 @@ def validation_note(rows):
             "the others stay visible but excluded from timing statistics.")
 
 
-def short_run_note(rows):
-    """Carry the harness's short-run warning, which lives only in summary.json."""
-    medians = [statistics.median(elapsed) for elapsed in (
-        [row["elapsed_ns"] for row in rows if row["configuration"] == name and row["included"]]
-        for name in CONFIGURATIONS) if elapsed]
-    if medians and min(medians) < 100_000_000:
-        return ("A median is under 100 ms, where process startup and timer noise may dominate; "
-                "prefer the absolute saving to the percentage.")
-    return None
+def short_run_medians(rows):
+    """Medians of the included runs, which are the only ones entering statistics."""
+    medians = {}
+    for name in CONFIGURATIONS:
+        elapsed = [row["elapsed_ns"] for row in rows if row["configuration"] == name and row["included"]]
+        medians[name] = statistics.median(elapsed) if elapsed else None
+    return medians
 
 
 def capture_identity(manifest):
@@ -217,9 +215,8 @@ def report_manifest(manifest, title, boundary, cohort, links, rows):
     if manifest.get("perf"):
         note += " This capture includes perf-stat overhead; it is instrumented evidence."
     # Reports never read summary.json, so carry its output warnings here.
-    for extra in (*output_warnings(rows), short_run_note(rows)):
-        if extra:
-            note += f" {extra}"
+    for extra in (*output_warnings(rows), *short_run_warnings(short_run_medians(rows))):
+        note += f" {extra}"
     return dict(
         schema=SCHEMA, title=title, summary=note,
         datasets=[dict(id="commands", title=title, configurations=list(CONFIGURATIONS),
